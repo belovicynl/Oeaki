@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>WipePaint - Final</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #e0e0e0; font-family: sans-serif; user-select: none; }
+        
+        canvas { display: block; background: #ffffff; touch-action: none; position: absolute; top: 0; left: 0; z-index: 1; cursor: crosshair;}
+        
+        .panel { background: rgba(30, 30, 30, 0.9); padding: 15px; border-radius: 10px; color: white; position: absolute; pointer-events: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 10; }
+        .ui-left { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 15px; width: 260px; }
+        .ui-right { top: 10px; right: 10px; width: 200px; max-height: 80vh; overflow-y: auto; }
+        .ui-bottom { bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+
+        .row { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+        .mode-toggles { display: flex; gap: 5px; width: 100%; }
+        
+        button { flex: 1; padding: 8px; cursor: pointer; background: #444; color: white; border: none; border-radius: 5px; transition: 0.2s; font-weight: bold; }
+        button:hover { background: #666; }
+        .active-mode { background: #00ff88; color: black; }
+        .active-tool { background: #0088ff; }
+        
+        input[type="range"], input[type="color"] { cursor: pointer; }
+        input[type="range"] { width: 100%; }
+        
+        .user-item { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid #444; font-size: 14px; }
+        .user-item input { cursor: pointer; transform: scale(1.2); }
+    </style>
+</head>
+<body>
+
+    <div class="panel ui-left">
+        <div class="mode-toggles">
+            <button id="modeDraw" class="active-mode">✏️ Рисовать</button>
+            <button id="modePan">✋ Двигать</button>
+        </div>
+        
+        <div class="row">
+            <input type="color" id="colorPicker" value="#0088ff" title="Выбрать цвет">
+            <input type="range" id="sizePicker" min="1" max="50" value="5" title="Толщина кисти">
+            <button id="eraserBtn">Ластик</button>
+        </div>
+
+        <div style="border-top: 1px solid #555; padding-top: 10px;">
+            <label style="font-size: 12px;">Прозрачность всех чужих рисунков:</label>
+            <input type="range" id="opacitySlider" min="0" max="1" step="0.05" value="1">
+        </div>
+
+        <button id="downloadBtn" style="background: #555; margin-top: 5px;">📸 Скачать вид</button>
+    </div>
+
+    <div class="panel ui-right">
+        <div id="onlineCounter" style="font-weight: bold; margin-bottom: 10px; color: #00ff88;">Онлайн: 1</div>
+        <div style="font-size: 12px; color: #aaa; margin-bottom: 5px;">Галочка = видно:</div>
+        <div id="usersList"></div>
+    </div>
+
+    <div class="panel ui-bottom">
+        <button id="zoomOut">➖ Уменьшить</button>
+        <button id="zoomReset">100%</button>
+        <button id="zoomIn">➕ Увеличить</button>
+    </div>
+
+    <canvas id="board"></canvas>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // ЛОВЕЦ ОШИБОК (оставим его на всякий случай)
+        window.onerror = function(msg, url, line) {
+            alert("ОШИБКА: " + msg + "\nСтрока: " + line);
+            return false; 
+        };
+
+        const socket = io();
+        const canvas = document.getElementById('board');
+        const ctx = canvas.getContext('2d');
+
+        // === ОБЪЯВЛЯЕМ ВСЕ ПЕРЕМЕННЫЕ В САМОМ НАЧАЛЕ ===
+        let redrawPending = false; // Вот она, виновница торжества! Теперь она в начале.
+        let myId = null;
+        let mode = 'draw'; 
+        let myColor = "#0088ff";
+        let mySize = 5;
+        let isEraser = false;
+        let globalOthersAlpha = 1;
+        let hiddenUsers = new Set(); 
+
+        let myStrokes = [];
+        let othersStrokes = [];
+        let otherCursors = {}; 
+
+        let camera = { x: window.innerWidth / 2, y: window.innerHeight / 2, zoom: 1 };
+        let isPanning = false;
+        let isDrawing = false;
+        let panStart = { x: 0, y: 0 };
+        let currentStroke = { points: [] };
+
+        // === БАЗОВЫЕ ФУНКЦИИ ===
+        function getWorldPos(screenX, screenY) {
+            return {
+                x: (screenX - camera.x) / camera.zoom,
+                y: (screenY - camera.y) / camera.zoom
+            };
+        }
+
+        function requestRedraw() {
+            if (!redrawPending) {
+                redrawPending = true;
+                requestAnimationFrame(renderCore);
+            }
+        }
+
+        function renderCore() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            ctx.save();
+            ctx.translate(camera.x, camera.y);
+            ctx.scale(camera.zoom, camera.zoom);
+
+            if (globalOthersAlpha > 0) {
+                othersStrokes.forEach(stroke => {
+                    if (stroke.userId !== myId && !hiddenUsers.has(stroke.userId)) {
+                        drawPoints(stroke.points, stroke.color, stroke.size, globalOthersAlpha);
+                    }
+                });
+            }
+
+            myStrokes.forEach(stroke => drawPoints(stroke.points, stroke.color, stroke.size, 1));
+            if (currentStroke.points.length > 0) drawPoints(currentStroke.points, currentStroke.color, currentStroke.size, 1);
+
+            if (globalOthersAlpha > 0) {
+                for (let id in otherCursors) {
+                    if (hiddenUsers.has(id)) continue; 
+                    const c = otherCursors[id];
+                    ctx.beginPath();
+                    ctx.arc(c.x, c.y, 5 / camera.zoom, 0, Math.PI * 2);
+                    ctx.fillStyle = c.color;
+                    ctx.globalAlpha = globalOthersAlpha; 
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            ctx.restore();
+            redrawPending = false;
+        }
+
+        function drawPoints(points, color, size, alpha) {
+            if (points.length < 2) return;
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = size;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x, points[i].y);
+            }
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+        }
+
+        // === СОКЕТЫ ===
+        socket.on('connect', () => { myId = socket.id; });
+        socket.on('init_canvas', (strokes) => { othersStrokes = strokes; requestRedraw(); });
+        socket.on('new_stroke', (stroke) => { othersStrokes.push(stroke); requestRedraw(); });
+        socket.on('wipe_canvas', () => { myStrokes = []; othersStrokes = []; requestRedraw(); });
+        socket.on('cursor_update', (data) => { otherCursors[data.id] = data; requestRedraw(); });
+        socket.on('cursor_remove', (id) => { delete otherCursors[id]; requestRedraw(); });
+
+        socket.on('update_users', (users) => {
+            const listDiv = document.getElementById('usersList');
+            if(!listDiv) return;
+            listDiv.innerHTML = '';
+            let count = 0;
+
+            for (let id in users) {
+                count++;
+                if (id === myId) continue; 
+
+                const div = document.createElement('div');
+                div.className = 'user-item';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = !hiddenUsers.has(id); 
+                
+                checkbox.addEventListener('change', (e) => {
+                    if (e.target.checked) hiddenUsers.delete(id);
+                    else hiddenUsers.add(id);
+                    requestRedraw(); 
+                });
+
+                const label = document.createElement('span');
+                label.innerText = 'Художник ' + id.substring(0, 4); 
+
+                div.appendChild(checkbox);
+                div.appendChild(label);
+                listDiv.appendChild(div);
+            }
+            const onlineCounter = document.getElementById('onlineCounter');
+            if (onlineCounter) onlineCounter.innerText = `Онлайн: ${count}`;
+        });
+
+        // === УПРАВЛЕНИЕ МЫШЬЮ ===
+        canvas.addEventListener('mousedown', (e) => {
+            if (mode === 'pan' || e.button === 1) {
+                isPanning = true;
+                panStart = { x: e.clientX - camera.x, y: e.clientY - camera.y };
+                canvas.style.cursor = 'grabbing';
+            } 
+            else if (mode === 'draw' && e.button === 0) {
+                isDrawing = true;
+                const worldPos = getWorldPos(e.clientX, e.clientY);
+                currentStroke = { points: [worldPos], color: isEraser ? '#ffffff' : myColor, size: mySize };
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                camera.x = e.clientX - panStart.x;
+                camera.y = e.clientY - panStart.y;
+                requestRedraw();
+                return;
+            }
+
+            if(e.target === canvas) {
+                const worldPos = getWorldPos(e.clientX, e.clientY);
+                socket.emit('cursor_move', { x: worldPos.x, y: worldPos.y, color: isEraser ? '#ccc' : myColor });
+
+                if (isDrawing) {
+                    currentStroke.points.push(worldPos);
+                    requestRedraw();
+                }
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.style.cursor = mode === 'pan' ? 'grab' : 'crosshair';
+            }
+            if (isDrawing && currentStroke.points.length > 1) {
+                myStrokes.push(JSON.parse(JSON.stringify(currentStroke)));
+                socket.emit('draw_stroke', currentStroke); 
+            }
+            isDrawing = false;
+            currentStroke.points = [];
+            requestRedraw();
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            const zoomSpeed = 0.1;
+            const worldPosBefore = getWorldPos(e.clientX, e.clientY);
+            
+            if (e.deltaY < 0) camera.zoom *= (1 + zoomSpeed);
+            else camera.zoom /= (1 + zoomSpeed);
+            
+            camera.zoom = Math.min(Math.max(0.1, camera.zoom), 10);
+            
+            const worldPosAfter = getWorldPos(e.clientX, e.clientY);
+            camera.x += (worldPosAfter.x - worldPosBefore.x) * camera.zoom;
+            camera.y += (worldPosAfter.y - worldPosBefore.y) * camera.zoom;
+            
+            requestRedraw();
+        });
+
+        // === КНОПКИ ИНТЕРФЕЙСА ===
+        document.getElementById('modeDraw').addEventListener('click', (e) => {
+            mode = 'draw';
+            e.target.classList.add('active-mode');
+            document.getElementById('modePan').classList.remove('active-mode');
+            canvas.style.cursor = 'crosshair';
+        });
+
+        document.getElementById('modePan').addEventListener('click', (e) => {
+            mode = 'pan';
+            e.target.classList.add('active-mode');
+            document.getElementById('modeDraw').classList.remove('active-mode');
+            canvas.style.cursor = 'grab';
+        });
+
+        document.getElementById('colorPicker').addEventListener('input', (e) => { 
+            myColor = e.target.value; 
+            isEraser = false; 
+            document.getElementById('eraserBtn').classList.remove('active-tool'); 
+        });
+        
+        document.getElementById('sizePicker').addEventListener('input', (e) => { 
+            mySize = e.target.value; 
+        });
+        
+        document.getElementById('eraserBtn').addEventListener('click', (e) => {
+            isEraser = !isEraser;
+            e.target.classList.toggle('active-tool', isEraser);
+        });
+
+        document.getElementById('opacitySlider').addEventListener('input', (e) => {
+            globalOthersAlpha = parseFloat(e.target.value); 
+            requestRedraw();
+        });
+
+        document.getElementById('zoomIn').addEventListener('click', () => { camera.zoom = Math.min(camera.zoom * 1.5, 10); requestRedraw(); });
+        document.getElementById('zoomOut').addEventListener('click', () => { camera.zoom = Math.max(camera.zoom / 1.5, 0.1); requestRedraw(); });
+        document.getElementById('zoomReset').addEventListener('click', () => { camera.zoom = 1; camera.x = window.innerWidth / 2; camera.y = window.innerHeight / 2; requestRedraw(); });
+
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'WipePaint_Art.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+
+        // === ИНИЦИАЛИЗАЦИЯ (Самое важное изменение - теперь это в самом конце!) ===
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            requestRedraw();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas(); // Запускаем только когда весь код выше уже загрузился
+    </script>
+</body>
+</html>
