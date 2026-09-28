@@ -2,52 +2,87 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>WipePaint - Final</title>
+    <!-- КРИТИЧНО ДЛЯ МОБИЛОК: Отключаем масштабирование браузера -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Oeaki</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #e0e0e0; font-family: sans-serif; user-select: none; }
+        :root { --accent: #0088ff; --panel-bg: rgba(20, 20, 20, 0.95); }
+        body { margin: 0; overflow: hidden; background-color: #ffffff; transition: background-color 0.3s; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; -webkit-user-select: none; }
         
-        canvas { display: block; background: #ffffff; touch-action: none; position: absolute; top: 0; left: 0; z-index: 1; cursor: crosshair;}
+        canvas { display: block; touch-action: none; position: absolute; top: 0; left: 0; z-index: 1; cursor: crosshair;}
         
-        .panel { background: rgba(30, 30, 30, 0.9); padding: 15px; border-radius: 10px; color: white; position: absolute; pointer-events: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 10; }
-        .ui-left { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 15px; width: 260px; }
-        .ui-right { top: 10px; right: 10px; width: 200px; max-height: 80vh; overflow-y: auto; }
-        .ui-bottom { bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+        .panel { background: var(--panel-bg); padding: 12px; border-radius: 8px; color: #ddd; position: absolute; pointer-events: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 10; backdrop-filter: blur(5px); border: 1px solid #333; }
+        
+        /* Адаптив для панелей */
+        .ui-left { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 12px; width: 240px; max-width: calc(100vw - 40px); }
+        .ui-right { top: 10px; right: 10px; width: 180px; max-height: 50vh; overflow-y: auto; }
+        .ui-bottom { bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; justify-content: center; width: max-content; }
 
-        .row { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+        .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
         .mode-toggles { display: flex; gap: 5px; width: 100%; }
         
-        button { flex: 1; padding: 8px; cursor: pointer; background: #444; color: white; border: none; border-radius: 5px; transition: 0.2s; font-weight: bold; }
-        button:hover { background: #666; }
-        .active-mode { background: #00ff88; color: black; }
-        .active-tool { background: #0088ff; }
+        button { flex: 1; padding: 8px 10px; cursor: pointer; background: #333; color: #fff; border: 1px solid #444; border-radius: 6px; transition: all 0.2s; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+        button:hover { background: #444; }
+        button:active { transform: scale(0.96); }
+        
+        .active-mode { background: #fff; color: #000; border-color: #fff; }
+        .active-tool { background: var(--accent); border-color: var(--accent); color: white; }
         
         input[type="range"], input[type="color"] { cursor: pointer; }
-        input[type="range"] { width: 100%; }
+        input[type="color"] { width: 30px; height: 30px; padding: 0; border: none; border-radius: 4px; overflow: hidden; }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
         
-        .user-item { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid #444; font-size: 14px; }
-        .user-item input { cursor: pointer; transform: scale(1.2); }
+        .range-wrapper { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+        .range-wrapper label { font-size: 10px; color: #aaa; text-transform: uppercase; }
+        input[type="range"] { width: 100%; margin: 0; }
+        
+        .user-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #333; font-size: 13px; }
+        .user-item:last-child { border-bottom: none; }
+        
+        #zoomDisplay { min-width: 45px; text-align: center; font-family: monospace; font-size: 14px; font-weight: bold; }
+
+        @media (max-width: 600px) {
+            .ui-left { top: auto; bottom: 80px; left: 10px; }
+            .ui-right { max-height: 30vh; background: transparent; box-shadow: none; border: none; right: 0; top: 0; }
+            .user-item label { text-shadow: 1px 1px 2px black; }
+        }
     </style>
 </head>
 <body>
 
+    <!-- Настройка фона теперь применяется к body через JS -->
+
     <div class="panel ui-left">
         <div class="mode-toggles">
-            <button id="modeDraw" class="active-mode">✏️ Рисовать</button>
-            <button id="modePan">✋ Двигать</button>
+            <button id="modeDraw" class="active-mode">Рисовать</button>
+            <button id="modePan">Двигать</button>
         </div>
         
         <div class="row">
-            <input type="color" id="colorPicker" value="#0088ff" title="Выбрать цвет">
-            <input type="range" id="sizePicker" min="1" max="50" value="5" title="Толщина кисти">
-            <button id="eraserBtn">Ластик</button>
+            <div class="range-wrapper" style="flex: 0 0 auto;">
+                <label>Кисть</label>
+                <input type="color" id="colorPicker" value="#0088ff">
+            </div>
+            <div class="range-wrapper">
+                <label>Толщина</label>
+                <input type="range" id="sizePicker" min="1" max="50" value="5">
+            </div>
+            <button id="eraserBtn" style="margin-top: 14px;">Ластик</button>
         </div>
 
-        <div style="border-top: 1px solid #555; padding-top: 10px;">
-            <label style="font-size: 12px;">Прозрачность всех чужих рисунков:</label>
-            <input type="range" id="opacitySlider" min="0" max="1" step="0.05" value="1">
+        <div class="row">
+            <div class="range-wrapper">
+                <label>Цвет холста</label>
+                <input type="color" id="bgColorPicker" value="#ffffff" style="width: 100%; height: 20px;">
+            </div>
+            <div class="range-wrapper">
+                <label>Чужие линии</label>
+                <input type="range" id="opacitySlider" min="0" max="1" step="0.05" value="1">
+            </div>
         </div>
 
-        <button id="downloadBtn" style="background: #555; margin-top: 5px;">📸 Скачать вид</button>
+        <button id="downloadBtn" style="background: #2a2a2a; margin-top: 5px;">Скачать холст</button>
     </div>
 
     <div class="panel ui-right">
@@ -57,33 +92,29 @@
     </div>
 
     <div class="panel ui-bottom">
-        <button id="zoomOut">➖ Уменьшить</button>
-        <button id="zoomReset">100%</button>
-        <button id="zoomIn">➕ Увеличить</button>
+        <button id="zoomOut">➖</button>
+        <span id="zoomDisplay">100%</span>
+        <button id="zoomIn">➕</button>
+        <button id="zoomReset" style="margin-left: 10px;">Сброс</button>
     </div>
 
     <canvas id="board"></canvas>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        // ЛОВЕЦ ОШИБОК (оставим его на всякий случай)
-        window.onerror = function(msg, url, line) {
-            alert("ОШИБКА: " + msg + "\nСтрока: " + line);
-            return false; 
-        };
-
         const socket = io();
         const canvas = document.getElementById('board');
         const ctx = canvas.getContext('2d');
 
-        // === ОБЪЯВЛЯЕМ ВСЕ ПЕРЕМЕННЫЕ В САМОМ НАЧАЛЕ ===
-        let redrawPending = false; // Вот она, виновница торжества! Теперь она в начале.
+        // === ПЕРЕМЕННЫЕ ===
+        let redrawPending = false; 
         let myId = null;
         let mode = 'draw'; 
         let myColor = "#0088ff";
         let mySize = 5;
         let isEraser = false;
         let globalOthersAlpha = 1;
+        let currentBgColor = "#ffffff";
         let hiddenUsers = new Set(); 
 
         let myStrokes = [];
@@ -95,6 +126,8 @@
         let isDrawing = false;
         let panStart = { x: 0, y: 0 };
         let currentStroke = { points: [] };
+        
+        let lastCursorSend = 0; // Для троттлинга мыши/пальца
 
         // === БАЗОВЫЕ ФУНКЦИИ ===
         function getWorldPos(screenX, screenY) {
@@ -112,22 +145,30 @@
         }
 
         function renderCore() {
+            // Очищаем прозрачный холст (фон задается в body CSS)
             ctx.clearRect(0, 0, canvas.width, canvas.height); 
             ctx.save();
             ctx.translate(camera.x, camera.y);
             ctx.scale(camera.zoom, camera.zoom);
 
+            // Рисуем чужие линии
             if (globalOthersAlpha > 0) {
                 othersStrokes.forEach(stroke => {
                     if (stroke.userId !== myId && !hiddenUsers.has(stroke.userId)) {
-                        drawPoints(stroke.points, stroke.color, stroke.size, globalOthersAlpha);
+                        drawPoints(stroke.points, stroke.color, stroke.size, globalOthersAlpha, stroke.isEraser);
                     }
                 });
             }
 
-            myStrokes.forEach(stroke => drawPoints(stroke.points, stroke.color, stroke.size, 1));
-            if (currentStroke.points.length > 0) drawPoints(currentStroke.points, currentStroke.color, currentStroke.size, 1);
+            // Рисуем свои линии
+            myStrokes.forEach(stroke => drawPoints(stroke.points, stroke.color, stroke.size, 1, stroke.isEraser));
+            
+            // Рисуем текущую линию в процессе
+            if (currentStroke.points.length > 0) {
+                drawPoints(currentStroke.points, currentStroke.color, currentStroke.size, 1, currentStroke.isEraser);
+            }
 
+            // Рисуем курсоры
             if (globalOthersAlpha > 0) {
                 for (let id in otherCursors) {
                     if (hiddenUsers.has(id)) continue; 
@@ -145,20 +186,31 @@
             redrawPending = false;
         }
 
-        function drawPoints(points, color, size, alpha) {
+        function drawPoints(points, color, size, alpha, strokeIsEraser) {
             if (points.length < 2) return;
+            
             ctx.globalAlpha = alpha;
-            ctx.strokeStyle = color;
+            // НАСТОЯЩИЙ ЛАСТИК: Стирает пиксели, делая их прозрачными, открывая цвет фона (body)
+            ctx.globalCompositeOperation = strokeIsEraser ? 'destination-out' : 'source-over';
+            ctx.strokeStyle = strokeIsEraser ? 'rgba(0,0,0,1)' : color;
             ctx.lineWidth = size;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
+            
             ctx.beginPath();
             ctx.moveTo(points[0].x, points[0].y);
             for (let i = 1; i < points.length; i++) {
                 ctx.lineTo(points[i].x, points[i].y);
             }
             ctx.stroke();
+            
+            // Возвращаем в нормальный режим
+            ctx.globalCompositeOperation = 'source-over';
             ctx.globalAlpha = 1;
+        }
+
+        function updateZoomDisplay() {
+            document.getElementById('zoomDisplay').innerText = Math.round(camera.zoom * 100) + '%';
         }
 
         // === СОКЕТЫ ===
@@ -192,51 +244,57 @@
                     requestRedraw(); 
                 });
 
-                const label = document.createElement('span');
-                label.innerText = 'Художник ' + id.substring(0, 4); 
+                const label = document.createElement('label');
+                label.innerText = 'Игрок ' + id.substring(0, 4); 
 
                 div.appendChild(checkbox);
                 div.appendChild(label);
                 listDiv.appendChild(div);
             }
-            const onlineCounter = document.getElementById('onlineCounter');
-            if (onlineCounter) onlineCounter.innerText = `Онлайн: ${count}`;
+            document.getElementById('onlineCounter').innerText = `ОНЛАЙН: ${count}`;
         });
 
-        // === УПРАВЛЕНИЕ МЫШЬЮ ===
-        canvas.addEventListener('mousedown', (e) => {
-            if (mode === 'pan' || e.button === 1) {
+        // === УПРАВЛЕНИЕ МЫШЬЮ И КАСАНИЯМИ ===
+        
+        function handleStart(clientX, clientY, isTouch, e) {
+            if (mode === 'pan' || (!isTouch && e.button === 1) || (isTouch && e.touches && e.touches.length > 1)) {
                 isPanning = true;
-                panStart = { x: e.clientX - camera.x, y: e.clientY - camera.y };
+                panStart = { x: clientX - camera.x, y: clientY - camera.y };
                 canvas.style.cursor = 'grabbing';
             } 
-            else if (mode === 'draw' && e.button === 0) {
+            else if (mode === 'draw' && (isTouch || e.button === 0)) {
                 isDrawing = true;
-                const worldPos = getWorldPos(e.clientX, e.clientY);
-                currentStroke = { points: [worldPos], color: isEraser ? '#ffffff' : myColor, size: mySize };
+                const worldPos = getWorldPos(clientX, clientY);
+                // Записываем флаг isEraser прямо в линию
+                currentStroke = { points: [worldPos], color: myColor, size: mySize, isEraser: isEraser };
             }
-        });
+        }
 
-        window.addEventListener('mousemove', (e) => {
+        function handleMove(clientX, clientY, e) {
             if (isPanning) {
-                camera.x = e.clientX - panStart.x;
-                camera.y = e.clientY - panStart.y;
+                camera.x = clientX - panStart.x;
+                camera.y = clientY - panStart.y;
                 requestRedraw();
                 return;
             }
 
             if(e.target === canvas) {
-                const worldPos = getWorldPos(e.clientX, e.clientY);
-                socket.emit('cursor_move', { x: worldPos.x, y: worldPos.y, color: isEraser ? '#ccc' : myColor });
+                const worldPos = getWorldPos(clientX, clientY);
+                
+                const now = Date.now();
+                if (now - lastCursorSend > 30) {
+                    socket.emit('cursor_move', { x: worldPos.x, y: worldPos.y, color: isEraser ? '#aaaaaa' : myColor });
+                    lastCursorSend = now;
+                }
 
                 if (isDrawing) {
                     currentStroke.points.push(worldPos);
                     requestRedraw();
                 }
             }
-        });
+        }
 
-        window.addEventListener('mouseup', () => {
+        function handleEnd() {
             if (isPanning) {
                 isPanning = false;
                 canvas.style.cursor = mode === 'pan' ? 'grab' : 'crosshair';
@@ -248,8 +306,27 @@
             isDrawing = false;
             currentStroke.points = [];
             requestRedraw();
-        });
+        }
 
+        // Привязка мыши
+        canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY, false, e));
+        window.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY, e));
+        window.addEventListener('mouseup', handleEnd);
+
+        // Привязка касаний (Мобилки)
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Отключает прокрутку экрана на мобилке
+            handleStart(e.touches[0].clientX, e.touches[0].clientY, true, e);
+        }, { passive: false });
+        
+        window.addEventListener('touchmove', (e) => {
+            if(e.target === canvas) e.preventDefault();
+            handleMove(e.touches[0].clientX, e.touches[0].clientY, e);
+        }, { passive: false });
+        
+        window.addEventListener('touchend', handleEnd);
+
+        // Зум колесиком
         canvas.addEventListener('wheel', (e) => {
             const zoomSpeed = 0.1;
             const worldPosBefore = getWorldPos(e.clientX, e.clientY);
@@ -258,6 +335,7 @@
             else camera.zoom /= (1 + zoomSpeed);
             
             camera.zoom = Math.min(Math.max(0.1, camera.zoom), 10);
+            updateZoomDisplay();
             
             const worldPosAfter = getWorldPos(e.clientX, e.clientY);
             camera.x += (worldPosAfter.x - worldPosBefore.x) * camera.zoom;
@@ -287,9 +365,12 @@
             document.getElementById('eraserBtn').classList.remove('active-tool'); 
         });
         
-        document.getElementById('sizePicker').addEventListener('input', (e) => { 
-            mySize = e.target.value; 
+        document.getElementById('bgColorPicker').addEventListener('input', (e) => { 
+            currentBgColor = e.target.value; 
+            document.body.style.backgroundColor = currentBgColor; // Меняем фон под прозрачным холстом
         });
+
+        document.getElementById('sizePicker').addEventListener('input', (e) => { mySize = e.target.value; });
         
         document.getElementById('eraserBtn').addEventListener('click', (e) => {
             isEraser = !isEraser;
@@ -301,25 +382,39 @@
             requestRedraw();
         });
 
-        document.getElementById('zoomIn').addEventListener('click', () => { camera.zoom = Math.min(camera.zoom * 1.5, 10); requestRedraw(); });
-        document.getElementById('zoomOut').addEventListener('click', () => { camera.zoom = Math.max(camera.zoom / 1.5, 0.1); requestRedraw(); });
-        document.getElementById('zoomReset').addEventListener('click', () => { camera.zoom = 1; camera.x = window.innerWidth / 2; camera.y = window.innerHeight / 2; requestRedraw(); });
+        document.getElementById('zoomIn').addEventListener('click', () => { camera.zoom = Math.min(camera.zoom * 1.5, 10); updateZoomDisplay(); requestRedraw(); });
+        document.getElementById('zoomOut').addEventListener('click', () => { camera.zoom = Math.max(camera.zoom / 1.5, 0.1); updateZoomDisplay(); requestRedraw(); });
+        document.getElementById('zoomReset').addEventListener('click', () => { camera.zoom = 1; camera.x = window.innerWidth / 2; camera.y = window.innerHeight / 2; updateZoomDisplay(); requestRedraw(); });
 
+        // УМНОЕ СКАЧИВАНИЕ СКРИНШОТА С ФОНОМ
         document.getElementById('downloadBtn').addEventListener('click', () => {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            const tCtx = tempCanvas.getContext('2d');
+            
+            // 1. Заливаем фон выбранным цветом
+            tCtx.fillStyle = currentBgColor;
+            tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+            
+            // 2. Рисуем сверху наши линии (они уже нарисованы на главном canvas)
+            tCtx.drawImage(canvas, 0, 0);
+
+            // 3. Скачиваем как JPEG без альфа-канала
             const link = document.createElement('a');
-            link.download = 'WipePaint_Art.png';
-            link.href = canvas.toDataURL();
+            link.download = 'WipePaint_Art.jpg';
+            link.href = tempCanvas.toDataURL('image/jpeg', 0.9);
             link.click();
         });
 
-        // === ИНИЦИАЛИЗАЦИЯ (Самое важное изменение - теперь это в самом конце!) ===
+        // === ИНИЦИАЛИЗАЦИЯ ===
         function resizeCanvas() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
             requestRedraw();
         }
         window.addEventListener('resize', resizeCanvas);
-        resizeCanvas(); // Запускаем только когда весь код выше уже загрузился
+        resizeCanvas(); 
     </script>
 </body>
 </html>

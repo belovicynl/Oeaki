@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const mongoose = require('mongoose'); // Подключаем переводчик для БД
 
 const app = express();
 const server = http.createServer(app);
@@ -13,52 +14,109 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-let allStrokes = []; 
 let activeUsers = {}; 
 
-// --- НОВАЯ ЛОГИКА ОЧИСТКИ ---
-let nextWipeTime = 0; // Переменная, где будет храниться точное время следующей очистки
+// === 1. ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ ===
+const mongoUri = process.env.MONGO_URI;
 
-function calculateNextWipe() {
-    const minTime = 24 * 60 * 60 * 1000; // 24 часа
-    const maxTime = 48 * 60 * 60 * 1000; // 48 часов
-    const randomDelay = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
-    
-    // Записываем точную дату и время в будущем (Текущее время + задержка)
-    nextWipeTime = Date.now() + randomDelay; 
-
-    const hours = (randomDelay / (1000 * 60 * 60)).toFixed(1);
-    console.log(`Следующее очищение холста запланировано через ${hours} часов.`);
+if (!mongoUri) {
+    console.error("ОШИБКА: Переменная MONGO_URI не найдена в Render Environment!");
+} else {
+    mongoose.connect(mongoUri)
+        .then(() => console.log('✅ Успешно подключено к MongoDB!'))
+        .catch(err => console.error('❌ Ошибка подключения к БД:', err));
 }
 
-// Задаем время при старте сервера
-calculateNextWipe();
+// === 2. СОЗДАЕМ СТРУКТУРУ ХРАНЕНИЯ ===
+// Так в базе будет выглядеть одна линия
+const StrokeSchema = new mongoose.Schema({
+    points: Array,
+    color: String,
+    size: Number,
+    isEraser: Boolean
+});
+const Stroke = mongoose.model('Stroke', StrokeSchema);
 
-// Проверяем каждую минуту, не пришло ли время
-setInterval(() => {
-    // Если текущее время стало больше или равно запланированному времени
-    if (Date.now() >= nextWipeTime) {
-        console.log('Время вышло! Очищаем холст!');
-        allStrokes = [];             
-        io.emit('wipe_canvas');      
-        calculateNextWipe(); // Назначаем новое время для следующей очистки
+// Так мы будем хранить таймер очистки (чтобы он пережил перезагрузку)
+const SystemSchema = new mongoose.Schema({
+    key: String,
+    nextWipeTime: Number
+});
+const System = mongoose.model('System', SystemSchema);
+
+
+// === 3. УМНАЯ ЛОГИКА ОЧИСТКИ ===
+async function checkWipeTimer() {
+    try {
+        let sys = await System.findOne({ key: 'wipe_timer' });
+        
+        // Если таймера в базе еще нет — создаем его
+        if (!sys) {
+            const minTime = 24 * 60 * 60 * 1000;
+            const maxTime = 48 * 60 * 60 * 1000;
+            const delay = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
+            
+            sys = new System({ key: 'wipe_timer', nextWipeTime: Date.now() + delay });
+            await sys.save();
+            console.log(`Таймер создан. Очистка через ${(delay / 1000 / 60 / 60).toFixed(1)} часов.`);
+            return;
+        }
+
+        // Если время пришло
+        if (Date.now() >= sys.nextWipeTime) {
+            console.log('Время вышло! Удаляем все рисунки из БД!');
+            
+            await Stroke.deleteMany({}); // Стираем всё из базы
+            io.emit('wipe_canvas');      // Заставляем браузеры очистить экраны
+            
+            // Назначаем новое время (24-48 часов)
+            const minTime = 24 * 60 * 60 * 1000;
+            const maxTime = 48 * 60 * 60 * 1000;
+            const delay = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
+            
+            sys.nextWipeTime = Date.now() + delay;
+            await sys.save();
+        }
+    } catch (err) {
+        console.error("Ошибка при проверке таймера:", err);
     }
-}, 60 * 1000); // 60 * 1000 мс = 1 минута
-// ----------------------------
+}
+// Сервер проверяет таймер каждую минуту
+setInterval(checkWipeTimer, 60 * 1000);
 
 
-io.on('connection', (socket) => {
+// === 4. СОКЕТЫ (ОБЩЕНИЕ С ИГРОКАМИ) ===
+io.on('connection', async (socket) => {
     console.log('Художник подключился:', socket.id);
     
     activeUsers[socket.id] = { id: socket.id };
     io.emit('update_users', activeUsers); 
 
-    socket.emit('init_canvas', allStrokes);
+    // Выгружаем ВСЮ историю рисунков из БД новому игроку
+    try {
+        const allStrokes = await Stroke.find({});
+        socket.emit('init_canvas', allStrokes);
+    } catch (err) {
+        console.error("Ошибка загрузки истории:", err);
+    }
 
-    socket.on('draw_stroke', (stroke) => {
+    socket.on('draw_stroke', async (stroke) => {
+        // Сразу отправляем линию другим игрокам (чтобы не было задержек)
         stroke.userId = socket.id;
-        allStrokes.push(stroke); 
         socket.broadcast.emit('new_stroke', stroke);
+        
+        // В фоновом режиме сохраняем линию в Базу Данных
+        try {
+            const newStroke = new Stroke({
+                points: stroke.points,
+                color: stroke.color,
+                size: stroke.size,
+                isEraser: stroke.isEraser
+            });
+            await newStroke.save();
+        } catch (err) {
+            console.error("Ошибка сохранения линии:", err);
+        }
     });
 
     socket.on('cursor_move', (pos) => {
@@ -74,6 +132,8 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
     console.log(`Сервер запущен на порту ${PORT}`);
+    // Запускаем проверку таймера один раз при старте сервера
+    await checkWipeTimer(); 
 });
