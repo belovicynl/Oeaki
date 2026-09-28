@@ -33,7 +33,8 @@ const StrokeSchema = new mongoose.Schema({
     points: Array,
     color: String,
     size: Number,
-    isEraser: Boolean
+    isEraser: Boolean,
+    userId: String
 });
 const Stroke = mongoose.model('Stroke', StrokeSchema);
 

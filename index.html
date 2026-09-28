@@ -42,15 +42,44 @@
         
         #zoomDisplay { min-width: 45px; text-align: center; font-family: monospace; font-size: 14px; font-weight: bold; }
 
-        @media (max-width: 600px) {
-            .ui-left { top: auto; bottom: 80px; left: 10px; }
-            .ui-right { max-height: 30vh; background: transparent; box-shadow: none; border: none; right: 0; top: 0; }
-            .user-item label { text-shadow: 1px 1px 2px black; }
+        /* КНОПКА ДЛЯ МОБИЛКИ (скрыта на ПК) */
+        .mobile-menu-btn { display: none; position: absolute; bottom: 80px; left: 10px; z-index: 20; background: var(--accent); border: none; padding: 12px 15px; border-radius: 30px; color: white; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-size: 14px; cursor: pointer; }
+
+        @media (max-width: 768px) {
+            /* Показываем кнопку меню */
+            .mobile-menu-btn { display: block; }
+            
+            /* Скрываем огромную панель по умолчанию, делаем ее компактной */
+            .ui-left { 
+                top: auto; 
+                bottom: 130px; /* Выше кнопки меню */
+                left: 10px; 
+                transform: scale(0.9); /* Чуть уменьшаем интерфейс */
+                transform-origin: bottom left;
+                display: none; /* Скрыта пока не нажмешь кнопку */
+            }
+            
+            /* Класс для показа панели */
+            .ui-left.show { display: flex; }
+
+            /* ЧИНИМ ПРАВУЮ ПАНЕЛЬ (возвращаем темный фон) */
+            .ui-right { 
+                max-height: 25vh; 
+                right: 10px; 
+                top: 10px; 
+                background: var(--panel-bg); /* Вернули фон */
+                box-shadow: 0 4px 15px rgba(0,0,0,0.5); 
+                border: 1px solid #333;
+                padding: 8px;
+            }
+
+            .ui-bottom { bottom: 15px; } /* Поднимаем зум-панель */
         }
     </style>
 </head>
 <body>
-
+    <!-- Эта кнопка появится только на телефоне -->
+    <button id="mobileMenuToggle" class="mobile-menu-btn">🎨 Инструменты</button>
     <!-- Настройка фона теперь применяется к body через JS -->
 
     <div class="panel ui-left">
@@ -345,6 +374,20 @@
         });
 
         // === КНОПКИ ИНТЕРФЕЙСА ===
+        // Логика кнопки меню для мобилок
+        const mobileBtn = document.getElementById('mobileMenuToggle');
+        const leftPanel = document.querySelector('.ui-left');
+        
+        mobileBtn.addEventListener('click', () => {
+            leftPanel.classList.toggle('show');
+            if(leftPanel.classList.contains('show')) {
+                mobileBtn.innerText = '❌ Закрыть';
+                mobileBtn.style.background = '#ff4444';
+            } else {
+                mobileBtn.innerText = '🎨 Инструменты';
+                mobileBtn.style.background = '#0088ff';
+            }
+        });
         document.getElementById('modeDraw').addEventListener('click', (e) => {
             mode = 'draw';
             e.target.classList.add('active-mode');
