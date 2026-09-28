@@ -20,13 +20,17 @@
         .row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
         .mode-toggles { display: flex; gap: 5px; width: 100%; }
         
-        /* Кнопки Рисовать и Двигать как на скриншоте */
-        button { flex: 1; padding: 7px 8px; cursor: pointer; background: #333; color: #fff; border: 1px solid #444; border-radius: 6px; transition: all 0.2s; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-        button:hover { background: #444; }
-        button:active { transform: scale(0.96); }
-        
-        #modeDraw.active-mode { background: #00E676; color: #000; border-color: #00E676; font-weight: bold; }
-        #modePan.active-mode { background: #444; color: #fff; border-color: #555; }
+        /* Кнопки */
+	button { flex: 1; padding: 7px 4px; cursor: pointer; background: #333; color: #fff; border: 1px solid #444; border-radius: 6px; 	transition: all 0.2s; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+	button:hover { background: #444; }
+	button:active { transform: scale(0.96); }
+
+	/* Возвращаем оригинальные цвета верхним кнопкам */
+	#modeDraw.active-mode { background: #1cd174; color: #000; border-color: #1cd174; font-weight: 700; }
+	#modePan.active-mode { background: #333; color: #fff; border-color: #555; }
+
+	/* Сетка для инструментов 2x2 */
+	.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; }
         
         .active-tool { background: #555; border-color: #777; color: white; box-shadow: inset 0 0 5px rgba(0,0,0,0.5); }
         
@@ -75,27 +79,28 @@
 
     <div class="panel ui-left">
         <div class="mode-toggles">
-            <button id="modeDraw" class="active-mode">✏️ Рисовать</button>
-            <button id="modePan">🖐️ Двигать</button>
-        </div>
-        
-        <div class="row">
-            <div class="range-wrapper" style="flex: 0 0 auto;">
-                <label>Цвет</label>
-                <input type="color" id="colorPicker" value="#0088ff">
-            </div>
-            <div class="range-wrapper">
-                <label>Толщина</label>
-                <input type="range" id="sizePicker" min="1" max="50" value="5">
-            </div>
-        </div>
+    		<button id="modeDraw" class="active-mode">✎ Рисовать</button>
+    		<button id="modePan">✋ Двигать</button>
+	</div>
 
-        <div class="row">
-            <button id="brushBtn" class="active-tool">Кисть</button>
-            <button id="rectBtn">🟩 Фон</button>
-            <button id="eraserBtn">Ластик</button>
-            <button id="pickerBtn">💉 Пипетка</button>
-        </div>
+	<div class="row">
+    		<div class="range-wrapper" style="flex: 0 0 auto;">
+        		<label>Цвет</label>
+        		<input type="color" id="colorPicker" value="#0088ff">
+    	</div>
+    		<div class="range-wrapper">
+        	<label>Толщина</label>
+        	<input type="range" id="sizePicker" min="1" max="50" value="5">
+    	</div>
+    </div>
+
+<!-- ИНСТРУМЕНТЫ ТЕПЕРЬ СЕТКОЙ 2х2 -->
+<div class="tool-grid">
+    <button id="brushBtn" class="active-tool">Кисть</button>
+    <button id="rectBtn">■ Фон</button>
+    <button id="eraserBtn">Ластик</button>
+    <button id="pickerBtn">Пипетка</button>
+</div>
 
         <div class="row">
             <div class="range-wrapper">
