@@ -2,7 +2,8 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
-const mongoose = require('mongoose'); // Подключаем переводчик для БД
+const mongoose = require('mongoose');
+const crypto = require('crypto'); // Для хэширования IP
 
 const app = express();
 const server = http.createServer(app);
@@ -28,8 +29,8 @@ if (!mongoUri) {
 }
 
 // === 2. СОЗДАЕМ СТРУКТУРУ ХРАНЕНИЯ ===
-// Так в базе будет выглядеть одна линия
 const StrokeSchema = new mongoose.Schema({
+    type: { type: String, default: 'brush' }, // 'brush' или 'rect'
     points: Array,
     color: String,
     size: Number,
@@ -38,81 +39,79 @@ const StrokeSchema = new mongoose.Schema({
 });
 const Stroke = mongoose.model('Stroke', StrokeSchema);
 
-// Так мы будем хранить таймер очистки (чтобы он пережил перезагрузку)
-const SystemSchema = new mongoose.Schema({
-    key: String,
-    nextWipeTime: Number
-});
-const System = mongoose.model('System', SystemSchema);
 
+// === 3. БАМПЛИМИТ (ОЧИСТКА ПО ПАМЯТИ) ===
+const MAX_MEMORY_MB = 250; // Лимит в мегабайтах (на Render дается 512, оставляем запас)
 
-// === 3. УМНАЯ ЛОГИКА ОЧИСТКИ ===
-async function checkWipeTimer() {
+async function checkMemoryLimit() {
     try {
-        let sys = await System.findOne({ key: 'wipe_timer' });
+        const memoryUsage = process.memoryUsage();
+        const rssMB = Math.round(memoryUsage.rss / 1024 / 1024);
         
-        // Если таймера в базе еще нет — создаем его
-        if (!sys) {
-            const minTime = 24 * 60 * 60 * 1000;
-            const maxTime = 48 * 60 * 60 * 1000;
-            const delay = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
-            
-            sys = new System({ key: 'wipe_timer', nextWipeTime: Date.now() + delay });
-            await sys.save();
-            console.log(`Таймер создан. Очистка через ${(delay / 1000 / 60 / 60).toFixed(1)} часов.`);
-            return;
-        }
+        console.log(`[SYS] Память сервера: ${rssMB} MB / ${MAX_MEMORY_MB} MB`);
 
-        // Если время пришло
-        if (Date.now() >= sys.nextWipeTime) {
-            console.log('Время вышло! Удаляем все рисунки из БД!');
-            
+        if (rssMB > MAX_MEMORY_MB) {
+            console.log('⚠️ ДОСТИГНУТ БАМПЛИМИТ ПАМЯТИ! Очищаем БД и холсты...');
             await Stroke.deleteMany({}); // Стираем всё из базы
             io.emit('wipe_canvas');      // Заставляем браузеры очистить экраны
             
-            // Назначаем новое время (24-48 часов)
-            const minTime = 24 * 60 * 60 * 1000;
-            const maxTime = 48 * 60 * 60 * 1000;
-            const delay = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
-            
-            sys.nextWipeTime = Date.now() + delay;
-            await sys.save();
+            // Если Node.js запущен с флагом --expose-gc, принудительно чистим мусор
+            if (global.gc) { global.gc(); } 
         }
     } catch (err) {
-        console.error("Ошибка при проверке таймера:", err);
+        console.error("Ошибка при проверке памяти:", err);
     }
 }
-// Сервер проверяет таймер каждую минуту
-setInterval(checkWipeTimer, 60 * 1000);
+// Сервер проверяет память каждую минуту
+setInterval(checkMemoryLimit, 60 * 1000);
+
+
+// === Вспомогательная функция для получения IP ===
+function getUserIdFromSocket(socket) {
+    // x-forwarded-for нужен для Render, иначе будет IP балансировщика
+    const ip = socket.handshake.headers['x-forwarded-for'] || socket.handshake.address;
+    // Создаем короткий хэш из IP, чтобы не светить реальные адреса, но держать уникальность
+    return crypto.createHash('md5').update(ip).digest('hex').substring(0, 8);
+}
 
 
 // === 4. СОКЕТЫ (ОБЩЕНИЕ С ИГРОКАМИ) ===
 io.on('connection', async (socket) => {
-    console.log('Художник подключился:', socket.id);
+    // 1 IP = 1 профиль. Даже с разных вкладок будет один ID.
+    const uniqueUserId = getUserIdFromSocket(socket);
+    socket.userId = uniqueUserId; 
+
+    console.log(`Художник подключился: Socket [${socket.id}] -> UserID [${uniqueUserId}]`);
     
-    activeUsers[socket.id] = { id: socket.id };
+    // Добавляем в онлайн только если такого ID еще нет
+    if (!activeUsers[uniqueUserId]) {
+        activeUsers[uniqueUserId] = { id: uniqueUserId, sockets: 1 };
+    } else {
+        activeUsers[uniqueUserId].sockets++;
+    }
+    
     io.emit('update_users', activeUsers); 
 
-    // Выгружаем ВСЮ историю рисунков из БД новому игроку
+    // Выгружаем ВСЮ историю рисунков
     try {
         const allStrokes = await Stroke.find({});
-        socket.emit('init_canvas', allStrokes);
+        socket.emit('init_canvas', { strokes: allStrokes, myId: uniqueUserId });
     } catch (err) {
         console.error("Ошибка загрузки истории:", err);
     }
 
     socket.on('draw_stroke', async (stroke) => {
-        // Сразу отправляем линию другим игрокам (чтобы не было задержек)
-        stroke.userId = socket.id;
+        stroke.userId = uniqueUserId;
         socket.broadcast.emit('new_stroke', stroke);
         
-        // В фоновом режиме сохраняем линию в Базу Данных
         try {
             const newStroke = new Stroke({
+                type: stroke.type || 'brush',
                 points: stroke.points,
                 color: stroke.color,
                 size: stroke.size,
-                isEraser: stroke.isEraser
+                isEraser: stroke.isEraser,
+                userId: uniqueUserId
             });
             await newStroke.save();
         } catch (err) {
@@ -121,20 +120,23 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('cursor_move', (pos) => {
-        socket.broadcast.emit('cursor_update', { id: socket.id, x: pos.x, y: pos.y, color: pos.color });
+        socket.broadcast.emit('cursor_update', { id: uniqueUserId, x: pos.x, y: pos.y, color: pos.color });
     });
 
     socket.on('disconnect', () => {
-        console.log('Художник отключился:', socket.id);
-        delete activeUsers[socket.id];
+        if (activeUsers[uniqueUserId]) {
+            activeUsers[uniqueUserId].sockets--;
+            // Удаляем юзера из списка, только если он закрыл ВСЕ свои вкладки
+            if (activeUsers[uniqueUserId].sockets <= 0) {
+                delete activeUsers[uniqueUserId];
+                io.emit('cursor_remove', uniqueUserId); 
+            }
+        }
         io.emit('update_users', activeUsers); 
-        io.emit('cursor_remove', socket.id); 
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, async () => {
+server.listen(PORT, () => {
     console.log(`Сервер запущен на порту ${PORT}`);
-    // Запускаем проверку таймера один раз при старте сервера
-    await checkWipeTimer(); 
 });
