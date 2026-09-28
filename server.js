@@ -16,23 +16,36 @@ app.get('/', (req, res) => {
 let allStrokes = []; 
 let activeUsers = {}; 
 
-function scheduleRandomWipe() {
+// --- НОВАЯ ЛОГИКА ОЧИСТКИ ---
+let nextWipeTime = 0; // Переменная, где будет храниться точное время следующей очистки
+
+function calculateNextWipe() {
     const minTime = 24 * 60 * 60 * 1000; // 24 часа
     const maxTime = 48 * 60 * 60 * 1000; // 48 часов
     const randomDelay = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
     
-    // ВЕРНУЛ ЭТУ СТРОКУ! Теперь в консоли снова пишет время.
-    const hours = (randomDelay / (1000 * 60 * 60)).toFixed(1);
-    console.log(`Следующее очищение холста произойдет примерно через ${hours} часов.`);
+    // Записываем точную дату и время в будущем (Текущее время + задержка)
+    nextWipeTime = Date.now() + randomDelay; 
 
-    setTimeout(() => {
-        console.log('Очищаем холст!');
+    const hours = (randomDelay / (1000 * 60 * 60)).toFixed(1);
+    console.log(`Следующее очищение холста запланировано через ${hours} часов.`);
+}
+
+// Задаем время при старте сервера
+calculateNextWipe();
+
+// Проверяем каждую минуту, не пришло ли время
+setInterval(() => {
+    // Если текущее время стало больше или равно запланированному времени
+    if (Date.now() >= nextWipeTime) {
+        console.log('Время вышло! Очищаем холст!');
         allStrokes = [];             
         io.emit('wipe_canvas');      
-        scheduleRandomWipe();        
-    }, randomDelay);
-}
-scheduleRandomWipe();
+        calculateNextWipe(); // Назначаем новое время для следующей очистки
+    }
+}, 60 * 1000); // 60 * 1000 мс = 1 минута
+// ----------------------------
+
 
 io.on('connection', (socket) => {
     console.log('Художник подключился:', socket.id);
