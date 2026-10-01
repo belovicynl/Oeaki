@@ -28,7 +28,7 @@
 
         <div class="tool-grid">
             <button id="brushBtn" class="active-tool" title="Кисть (B)">🖌&#xFE0E; КИСТЬ</button>
-            <button id="rectBtn" title="Квадрат (R)">■&#xFE0E; КВАДРАТ</button>
+            <button id="rectBtn" title="Квадрат (R)"><span style="font-size: 14px;">⬛&#xFE0E;</span> КВАДРАТ</button>
             <button id="eraserBtn" title="Ластик (E)">▱&#xFE0E; ЛАСТИК</button>
             <button id="fillBtn" title="Заливка (F)">🪣&#xFE0E; ЗАЛИВКА</button>
             <button id="pickerBtn" title="Пипетка (I)" style="grid-column: span 2;">💉&#xFE0E; ПИПЕТКА</button>
@@ -37,7 +37,8 @@
         <button id="undoBtn" style="background: #e0e0e0; color: #333; margin-top: 5px;" title="Отмена (Ctrl+Z)">↩&#xFE0E; ОТМЕНА</button>
         <button id="downloadBtn" style="background: #e0e0e0; color: #333; margin-top: 5px;">💾&#xFE0E; СКАЧАТЬ</button>
         
-        <div class="hint-text">Зум: + / - / 0</div>
+        <!-- Новая панель статуса (Зум и Координаты) -->
+        <div id="statusText" class="hint-text">Зум: 100% | X: 0, Y: 0</div>
     </div>
 
     <canvas id="board"></canvas>

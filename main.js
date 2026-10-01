@@ -5,7 +5,8 @@ const ctx = canvas.getContext('2d', { willReadFrequently: true });
 let redrawPending = false; 
 let myId = null;
 let mode = 'draw'; 
-let currentTool = 'brush'; 
+let currentTool = 'brush';
+let lastWorldPos = { x: 0, y: 0 }; 
 
 let myColor = "#000000";
 let mySize = 3;
@@ -43,6 +44,13 @@ function getWorldPos(screenX, screenY) {
         x: (screenX - camera.x) / camera.zoom,
         y: (screenY - camera.y) / camera.zoom
     };
+}
+
+function updateStatusUI() {
+    const statusEl = document.getElementById('statusText');
+    if(statusEl) {
+        statusEl.innerText = `Зум: ${Math.round(camera.zoom * 100)}% | X: ${Math.round(lastWorldPos.x)}, Y: ${Math.round(lastWorldPos.y)}`;
+    }
 }
 
 // === РЕНДЕР И ОТРИСОВКА ===
@@ -222,6 +230,8 @@ function handleMove(clientX, clientY, e) {
 
     if(e.target === canvas) {
         const worldPos = getWorldPos(clientX, clientY);
+	lastWorldPos = worldPos;
+	updateStatusUI();
         const now = Date.now();
         if (now - lastCursorSend > 30) { socket.emit('cursor_move', { x: worldPos.x, y: worldPos.y, color: currentTool === 'eraser' ? '#aaaaaa' : myColor }); lastCursorSend = now; }
 
@@ -265,6 +275,7 @@ window.addEventListener('touchmove', (e) => {
     if (e.touches.length === 2 && initialPinchDist) {
         const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
         camera.zoom = Math.min(Math.max(0.1, initialZoom * (dist / initialPinchDist)), 10);
+	updateStatusUI();
         requestRedraw();
     } else {
         handleMove(e.touches[0].clientX, e.touches[0].clientY, e);
@@ -314,7 +325,9 @@ function setTool(newTool) {
     toolBtns[newTool].classList.add('active-tool');
     if(mode !== 'draw') document.getElementById('modeDraw').click();
 }
-for(let k in toolBtns) toolBtns[key = k].addEventListener('click', () => setTool(key));
+for (let k in toolBtns) {
+    toolBtns[k].addEventListener('click', () => setTool(k));
+}
 
 document.getElementById('undoBtn').addEventListener('click', performUndo);
 document.getElementById('colorPicker').addEventListener('input', (e) => { myColor = e.target.value; if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush'); });
