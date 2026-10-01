@@ -50,7 +50,6 @@ function updateStatusUI() {
     }
 }
 
-// === ОБНОВЛЕННАЯ ОТРИСОВКА (Эллипс как в Paint) ===
 function drawShape(context, stroke) {
     if (stroke.points.length < 2) return;
     context.globalCompositeOperation = stroke.isEraser ? 'destination-out' : 'source-over';
@@ -69,7 +68,6 @@ function drawShape(context, stroke) {
         context.rect(start.x, start.y, end.x - start.x, end.y - start.y);
         context.fill();
     } else if (stroke.type === 'circle') {
-        // Вычисляем центр и радиусы эллипса по рамке (как в MS Paint)
         const cx = (start.x + end.x) / 2;
         const cy = (start.y + end.y) / 2;
         const rx = Math.abs(end.x - start.x) / 2;
@@ -123,9 +121,7 @@ function renderCore() {
     redrawPending = false;
 }
 
-// === ОБНОВЛЕННАЯ ЗАЩИТА (Эллипс использует ту же рамку, что и квадрат) ===
 function calcBounds(stroke) {
-    // Теперь логика габаритов круга и квадрата абсолютно одинаковая!
     if(stroke.type === 'rect' || stroke.type === 'circle') {
         const start = stroke.points[0], end = stroke.points[stroke.points.length-1];
         return { 
@@ -184,10 +180,11 @@ function rgbToHex(r, g, b) { return "#" + (1 << 24 | r << 16 | g << 8 | b).toStr
 function pickColor(x, y) {
     const px = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
     const hex = px[3] === 0 ? "#ffffff" : rgbToHex(px[0], px[1], px[2]);
-    updateGlobalColor(hex); // ОБНОВЛЕНО
+    document.getElementById('colorPicker').value = hex; 
+    myColor = hex;
+    setTool('brush');
 }
 
-// Вспомогательные функции для заливки
 function sqr(x) { return x * x; }
 function dist2(v, w) { return sqr(v.x - w.x) + sqr(v.y - w.y); }
 function distToSegmentSquared(p, v, w) {
@@ -198,7 +195,6 @@ function distToSegmentSquared(p, v, w) {
     return dist2(p, { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) });
 }
 
-// === ОБНОВЛЕННАЯ ЗАЛИВКА (Понимает форму эллипса) ===
 function handleFill(worldPos) {
     for (let i = myStrokes.length - 1; i >= 0; i--) {
         const s = myStrokes[i];
@@ -216,7 +212,6 @@ function handleFill(worldPos) {
             hit = (worldPos.x >= minX && worldPos.x <= maxX && worldPos.y >= minY && worldPos.y <= maxY);
         } 
         else if (s.type === 'circle') {
-            // Формула попадания точки в эллипс
             const cx = (start.x + end.x) / 2;
             const cy = (start.y + end.y) / 2;
             const rx = Math.abs(end.x - start.x) / 2;
@@ -318,14 +313,17 @@ canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY, fa
 window.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY, e));
 window.addEventListener('mouseup', handleEnd);
 
-// ЗУМ МЫШКОЙ
+// === ИСПРАВЛЕННАЯ МАТЕМАТИКА ЗУМА ===
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const wBefore = getWorldPos(e.clientX, e.clientY);
     
-    const zoomIntensity = 0.1;
-    if (e.deltaY < 0) camera.zoom = Math.min(camera.zoom * (1 + zoomIntensity), 10);
-    else camera.zoom = Math.max(camera.zoom * (1 - zoomIntensity), 0.1);
+    // ПРИБАВЛЯЕМ СТРОГО ПО 10% (0.1) ИЛИ ОТНИМАЕМ
+    if (e.deltaY < 0) camera.zoom = Math.min(camera.zoom + 0.1, 10);
+    else camera.zoom = Math.max(camera.zoom - 0.1, 0.1);
+    
+    // Округляем, чтобы не было кривых цифр типа 3.00000001
+    camera.zoom = Math.round(camera.zoom * 10) / 10;
     
     const wAfter = getWorldPos(e.clientX, e.clientY);
     camera.x += (wAfter.x - wBefore.x) * camera.zoom;
@@ -378,14 +376,17 @@ window.addEventListener('keydown', (e) => {
     if (key === 'i') { mode = 'draw'; setTool('picker'); }
     if (key === 'h') { document.getElementById('modePan').click(); }
     
+    // МАТЕМАТИКА ЗУМА С КЛАВИАТУРЫ (Тоже по 10%)
     if (key === '=' || key === '+' || key === '-' || key === '0') {
         const cx = window.innerWidth / 2;
         const cy = window.innerHeight / 2;
         const wBefore = getWorldPos(cx, cy);
         
-        if (key === '=' || key === '+') camera.zoom = Math.min(camera.zoom * 1.2, 10);
-        if (key === '-') camera.zoom = Math.max(camera.zoom / 1.2, 0.1);
+        if (key === '=' || key === '+') camera.zoom = Math.min(camera.zoom + 0.1, 10);
+        if (key === '-') camera.zoom = Math.max(camera.zoom - 0.1, 0.1);
         if (key === '0') camera.zoom = 1;
+        
+        camera.zoom = Math.round(camera.zoom * 10) / 10;
         
         const wAfter = getWorldPos(cx, cy);
         camera.x += (wAfter.x - wBefore.x) * camera.zoom;
@@ -396,7 +397,27 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-document.getElementById('mobileMenuToggle').addEventListener('click', (e) => { document.querySelector('.ui-left').classList.toggle('show'); });
+// КНОПКА ОТКРЫТИЯ МЕНЮ (С ВДАВЛИВАНИЕМ)
+document.getElementById('mobileMenuToggle').addEventListener('click', (e) => { 
+    document.querySelector('.ui-left').classList.toggle('show'); 
+    e.currentTarget.classList.toggle('pressed'); // Добавляем/убираем эффект нажатия
+});
+
+// КНОПКА СБРОСА ЗУМА НА ТЕЛЕФОНЕ
+document.getElementById('resetZoomBtn').addEventListener('click', () => {
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const wBefore = getWorldPos(cx, cy);
+    
+    camera.zoom = 1; // Устанавливаем 100%
+    
+    const wAfter = getWorldPos(cx, cy);
+    camera.x += (wAfter.x - wBefore.x) * camera.zoom;
+    camera.y += (wAfter.y - wBefore.y) * camera.zoom;
+    
+    updateStatusUI(); 
+    requestRedraw();
+});
 
 document.getElementById('modeDraw').addEventListener('click', (e) => {
     mode = 'draw'; e.target.classList.add('active-mode'); document.getElementById('modePan').classList.remove('active-mode'); canvas.style.cursor = 'crosshair';
@@ -425,28 +446,11 @@ for (let k in toolBtns) toolBtns[k].addEventListener('click', () => setTool(k));
 
 document.getElementById('undoBtn').addEventListener('click', performUndo);
 
-// === СИНХРОНИЗАЦИЯ ЦВЕТА (ОБА ВАРИАНТА ПАЛИТРЫ) ===
-const colorPickerDesktop = document.getElementById('colorPickerDesktop');
-const colorPickerMobile = document.getElementById('colorPickerMobile');
-
-function updateGlobalColor(hex) {
-    myColor = hex;
-    colorPickerDesktop.value = hex;
-    colorPickerMobile.value = hex;
-    if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush');
-}
-
-// Нажатие по квадратикам в мобильной палитре
-document.querySelectorAll('.swatch').forEach(sw => {
-    sw.addEventListener('click', (e) => {
-        updateGlobalColor(e.target.getAttribute('data-c'));
-    });
+// ПРОСТАЯ ПАЛИТРА
+document.getElementById('colorPicker').addEventListener('input', (e) => { 
+    myColor = e.target.value; 
+    if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush'); 
 });
-
-// Ручной выбор цвета на ПК и на телефоне
-colorPickerDesktop.addEventListener('input', (e) => updateGlobalColor(e.target.value));
-colorPickerMobile.addEventListener('input', (e) => updateGlobalColor(e.target.value));
-
 document.getElementById('sizePicker').addEventListener('input', (e) => { mySize = e.target.value; });
 
 document.getElementById('downloadBtn').addEventListener('click', () => {
