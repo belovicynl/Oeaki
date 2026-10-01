@@ -18,7 +18,19 @@
         <div class="row">
             <div class="range-wrapper" style="flex: 0 0 auto;">
                 <label>Цвет</label>
-                <input type="color" id="colorPicker" value="#000000">
+                <!-- НОВАЯ ПАЛИТРА КАК В WINDOWS -->
+                <div class="custom-palette">
+                    <div class="swatch" style="background: #000000" data-c="#000000"></div>
+                    <div class="swatch" style="background: #ffffff" data-c="#ffffff"></div>
+                    <div class="swatch" style="background: #ff0000" data-c="#ff0000"></div>
+                    <div class="swatch" style="background: #00ff00" data-c="#00ff00"></div>
+                    <div class="swatch" style="background: #0000ff" data-c="#0000ff"></div>
+                    <div class="swatch" style="background: #ffff00" data-c="#ffff00"></div>
+                    <div class="swatch" style="background: #800080" data-c="#800080"></div>
+                    <div class="swatch-native" title="Больше цветов">
+                        <input type="color" id="colorPicker" value="#000000">
+                    </div>
+                </div>
             </div>
             <div class="range-wrapper">
                 <label>Толщина</label>
@@ -28,8 +40,10 @@
 
         <div class="tool-grid">
             <button id="brushBtn" class="active-tool" title="Кисть (B)">🖌&#xFE0E; КИСТЬ</button>
-            <button id="rectBtn" title="Квадрат (R)"><span style="font-size: 14px;">⬛&#xFE0E;</span> КВАДРАТ</button>
             <button id="eraserBtn" title="Ластик (E)">▱&#xFE0E; ЛАСТИК</button>
+            <button id="rectBtn" title="Квадрат (R)"><span style="font-size: 14px;">⬛&#xFE0E;</span> КВАДРАТ</button>
+            <button id="circleBtn" title="Круг (C)">⭕&#xFE0E; КРУГ</button>
+            <button id="lineBtn" title="Линия (L)">➖&#xFE0E; ЛИНИЯ</button>
             <button id="fillBtn" title="Заливка (F)">🪣&#xFE0E; ЗАЛИВКА</button>
             <button id="pickerBtn" title="Пипетка (I)" style="grid-column: span 2;">💉&#xFE0E; ПИПЕТКА</button>
         </div>
@@ -37,7 +51,6 @@
         <button id="undoBtn" style="background: #e0e0e0; color: #333; margin-top: 5px;" title="Отмена (Ctrl+Z)">↩&#xFE0E; ОТМЕНА</button>
         <button id="downloadBtn" style="background: #e0e0e0; color: #333; margin-top: 5px;">💾&#xFE0E; СКАЧАТЬ</button>
         
-        <!-- Новая панель статуса (Зум и Координаты) -->
         <div id="statusText" class="hint-text">Зум: 100% | X: 0, Y: 0</div>
     </div>
 

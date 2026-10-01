@@ -16,7 +16,6 @@ let myStrokes = [];
 let othersStrokes = [];
 let otherCursors = {}; 
 
-// Случайный спавн при входе (радиус 2000px)
 const spawnRadius = 2000;
 const randomAngle = Math.random() * Math.PI * 2;
 const randomDist = Math.random() * spawnRadius;
@@ -32,11 +31,9 @@ let panStart = { x: 0, y: 0 };
 let currentStroke = { type: 'brush', points: [] };
 let lastCursorSend = 0;
 
-// Для Pinch-to-zoom на телефоне
 let initialPinchDist = null;
 let initialZoom = 1;
 
-// Генератор уникальных ID для отмены (Undo)
 function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
 
 function getWorldPos(screenX, screenY) {
@@ -49,12 +46,12 @@ function getWorldPos(screenX, screenY) {
 function updateStatusUI() {
     const statusEl = document.getElementById('statusText');
     if(statusEl) {
-        // Убрали X и Y, добавили скобки
-        statusEl.innerText = `Зум: ${Math.round(camera.zoom * 100)}% | (${Math.round(lastWorldPos.x)}, ${Math.round(lastWorldPos.y)})`;
+        // УБРАНЫ СКОБКИ!
+        statusEl.innerText = `Зум: ${Math.round(camera.zoom * 100)}% | ${Math.round(lastWorldPos.x)}, ${Math.round(lastWorldPos.y)}`;
     }
 }
 
-// === РЕНДЕР И ОТРИСОВКА ===
+// === РЕНДЕР И ОТРИСОВКА (ДОБАВЛЕНЫ КРУГ И ЛИНИЯ) ===
 function drawShape(context, stroke) {
     if (stroke.points.length < 2) return;
     context.globalCompositeOperation = stroke.isEraser ? 'destination-out' : 'source-over';
@@ -64,15 +61,23 @@ function drawShape(context, stroke) {
     context.lineCap = 'round';
     context.lineJoin = 'round';
 
+    const start = stroke.points[0];
+    const end = stroke.points[stroke.points.length - 1]; 
+
+    context.beginPath();
+    
     if (stroke.type === 'rect') {
-        const start = stroke.points[0];
-        // БЫЛА ОШИБКА ЗДЕСЬ: Берем последнюю точку, а не вторую!
-        const end = stroke.points[stroke.points.length - 1]; 
-        context.beginPath();
         context.rect(start.x, start.y, end.x - start.x, end.y - start.y);
         context.fill();
+    } else if (stroke.type === 'circle') {
+        const radius = Math.hypot(end.x - start.x, end.y - start.y);
+        context.arc(start.x, start.y, radius, 0, Math.PI * 2);
+        context.fill();
+    } else if (stroke.type === 'line') {
+        context.moveTo(start.x, start.y);
+        context.lineTo(end.x, end.y);
+        context.stroke();
     } else {
-        context.beginPath();
         context.moveTo(stroke.points[0].x, stroke.points[0].y);
         for (let i = 1; i < stroke.points.length; i++) context.lineTo(stroke.points[i].x, stroke.points[i].y);
         context.stroke();
@@ -90,18 +95,17 @@ function renderCore() {
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.zoom, camera.zoom);
 
-    // Чужие рисунки
     othersStrokes.forEach(stroke => drawShape(ctx, stroke));
 
-    // Свои рисунки (на скрытом холсте для правильной работы ластика)
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
     const tCtx = tempCanvas.getContext('2d');
     tCtx.save(); tCtx.translate(camera.x, camera.y); tCtx.scale(camera.zoom, camera.zoom);
+    
     myStrokes.forEach(stroke => drawShape(tCtx, stroke));
     if (currentStroke.points.length > 0) drawShape(tCtx, currentStroke);
+    
     tCtx.restore();
-
     ctx.restore(); 
     ctx.drawImage(tempCanvas, 0, 0);
 
@@ -116,12 +120,19 @@ function renderCore() {
     redrawPending = false;
 }
 
-// === АНТИ-ВАНДАЛИЗМ (Приватные зоны) ===
+// === АНТИ-ВАНДАЛИЗМ (ОБНОВЛЕНО ДЛЯ КРУГОВ И ЛИНИЙ) ===
 function calcBounds(stroke) {
     if(stroke.type === 'rect') {
-        const x1 = stroke.points[0].x, x2 = stroke.points[1].x;
-        const y1 = stroke.points[0].y, y2 = stroke.points[1].y;
-        return { minX: Math.min(x1, x2), maxX: Math.max(x1, x2), minY: Math.min(y1, y2), maxY: Math.max(y1, y2) };
+        const start = stroke.points[0], end = stroke.points[stroke.points.length-1];
+        return { 
+            minX: Math.min(start.x, end.x), maxX: Math.max(start.x, end.x), 
+            minY: Math.min(start.y, end.y), maxY: Math.max(start.y, end.y) 
+        };
+    }
+    if (stroke.type === 'circle') {
+        const start = stroke.points[0], end = stroke.points[stroke.points.length-1];
+        const r = Math.hypot(end.x - start.x, end.y - start.y);
+        return { minX: start.x - r, maxX: start.x + r, minY: start.y - r, maxY: start.y + r };
     }
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     stroke.points.forEach(p => {
@@ -132,24 +143,23 @@ function calcBounds(stroke) {
 }
 
 function isPositionProtected(x, y) {
-    const SAFE_ZONE = 30; // 30px защитное поле вокруг чужого
+    const SAFE_ZONE = 30; 
     for (let i = othersStrokes.length - 1; i >= 0; i--) {
         const b = othersStrokes[i].bounds;
         if (!b) continue;
         if (x >= b.minX - SAFE_ZONE && x <= b.maxX + SAFE_ZONE && y >= b.minY - SAFE_ZONE && y <= b.maxY + SAFE_ZONE) {
-            return true; // Зона занята
+            return true; 
         }
     }
     return false;
 }
 
-// === СОКЕТЫ ===
 socket.on('init_canvas', (data) => { 
     myId = data.myId; 
     othersStrokes = []; myStrokes = [];
     data.strokes.forEach(s => {
         if (!s.strokeId) s.strokeId = 'legacy_' + Math.random().toString(36);
-	s.bounds = calcBounds(s); // Предрасчет габаритов
+        s.bounds = calcBounds(s); 
         if(s.userId === myId) myStrokes.push(s); else othersStrokes.push(s);
     });
     requestRedraw(); 
@@ -170,34 +180,55 @@ socket.on('stroke_color_changed', (data) => {
     requestRedraw();
 });
 
-// === ИНСТРУМЕНТЫ (Пипетка, Заливка, Отмена) ===
 function rgbToHex(r, g, b) { return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1); }
 
 function pickColor(x, y) {
     const px = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
-    const hex = px[3] === 0 ? currentBgColor : rgbToHex(px[0], px[1], px[2]);
+    const hex = px[3] === 0 ? "#ffffff" : rgbToHex(px[0], px[1], px[2]);
     document.getElementById('colorPicker').value = hex; myColor = hex;
     setTool('brush');
 }
 
+// === НОВАЯ ЗАЛИВКА (ЗАКРАШИВАЕТ ТОЛЬКО СВОИ ФИГУРЫ) ===
 function handleFill(worldPos) {
-    // Проверяем клик по СВОИМ прямоугольникам (с конца, чтобы брать верхние)
+    const tCanvas = document.createElement('canvas');
+    const tCtx = tCanvas.getContext('2d');
+    
+    // Идем с конца, чтобы кликать по самым верхним фигурам
     for (let i = myStrokes.length - 1; i >= 0; i--) {
         const s = myStrokes[i];
+        if (s.points.length < 2) continue;
+        
+        tCtx.beginPath();
+        const start = s.points[0];
+        const end = s.points[s.points.length - 1];
+        let hit = false;
+
         if (s.type === 'rect') {
-            const minX = Math.min(s.points[0].x, s.points[1].x); const maxX = Math.max(s.points[0].x, s.points[1].x);
-            const minY = Math.min(s.points[0].y, s.points[1].y); const maxY = Math.max(s.points[0].y, s.points[1].y);
-            if (worldPos.x >= minX && worldPos.x <= maxX && worldPos.y >= minY && worldPos.y <= maxY) {
-                s.color = myColor; // Перекрашиваем
-                socket.emit('update_stroke_color', { strokeId: s.strokeId, color: myColor });
-                requestRedraw();
-                return;
-            }
+            tCtx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
+            hit = tCtx.isPointInPath(worldPos.x, worldPos.y);
+        } else if (s.type === 'circle') {
+            const radius = Math.hypot(end.x - start.x, end.y - start.y);
+            tCtx.arc(start.x, start.y, radius, 0, Math.PI * 2);
+            hit = tCtx.isPointInPath(worldPos.x, worldPos.y);
+        } else {
+            // Для линий и кистей проверяем попадание прямо в линию
+            tCtx.lineWidth = s.size;
+            tCtx.lineCap = 'round';
+            tCtx.lineJoin = 'round';
+            tCtx.moveTo(s.points[0].x, s.points[0].y);
+            for (let j = 1; j < s.points.length; j++) tCtx.lineTo(s.points[j].x, s.points[j].y);
+            hit = tCtx.isPointInStroke(worldPos.x, worldPos.y);
+        }
+
+        if (hit) {
+            s.color = myColor; 
+            socket.emit('update_stroke_color', { strokeId: s.strokeId, color: myColor });
+            requestRedraw();
+            return; // Закрасили 1 фигуру и остановились
         }
     }
-    // Если мимо квадратов — заливаем свой локальный фон
-    currentBgColor = myColor;
-    document.body.style.backgroundColor = currentBgColor;
+    // Белый фон больше не трогаем!
 }
 
 function performUndo() {
@@ -219,11 +250,21 @@ function handleStart(clientX, clientY, isTouch, e) {
         if (currentTool === 'picker') { pickColor(clientX, clientY); return; }
         if (currentTool === 'fill') { handleFill(worldPos); return; }
         
-        // Проверка привата! Если кликаем в чужую зону — блок.
         if (isPositionProtected(worldPos.x, worldPos.y)) return;
 
         isDrawing = true;
-        currentStroke = { strokeId: generateId(), type: currentTool === 'rect' ? 'rect' : 'brush', points: [worldPos], color: myColor, size: mySize, isEraser: currentTool === 'eraser' };
+        
+        let shapeType = 'brush';
+        if (['rect', 'circle', 'line'].includes(currentTool)) shapeType = currentTool;
+
+        currentStroke = { 
+            strokeId: generateId(), 
+            type: shapeType, 
+            points: [worldPos], 
+            color: myColor, 
+            size: mySize, 
+            isEraser: currentTool === 'eraser' 
+        };
     }
 }
 
@@ -232,13 +273,12 @@ function handleMove(clientX, clientY, e) {
 
     if(e.target === canvas) {
         const worldPos = getWorldPos(clientX, clientY);
-	lastWorldPos = worldPos;
-	updateStatusUI();
+        lastWorldPos = worldPos;
+        updateStatusUI();
         const now = Date.now();
         if (now - lastCursorSend > 30) { socket.emit('cursor_move', { x: worldPos.x, y: worldPos.y, color: currentTool === 'eraser' ? '#aaaaaa' : myColor }); lastCursorSend = now; }
 
         if (isDrawing) {
-            // Если в процессе рисования линия залезла в чужой приват - обрываем линию
             if (isPositionProtected(worldPos.x, worldPos.y)) { handleEnd(); return; }
             currentStroke.points.push(worldPos);
             requestRedraw();
@@ -249,7 +289,9 @@ function handleMove(clientX, clientY, e) {
 function handleEnd() {
     if (isPanning) { isPanning = false; canvas.style.cursor = mode === 'pan' ? 'grab' : 'crosshair'; }
     if (isDrawing && currentStroke.points.length > 1) {
-        if(currentStroke.type === 'rect') currentStroke.points = [currentStroke.points[0], currentStroke.points[currentStroke.points.length-1]];
+        if(['rect', 'circle', 'line'].includes(currentStroke.type)) {
+            currentStroke.points = [currentStroke.points[0], currentStroke.points[currentStroke.points.length-1]];
+        }
         currentStroke.bounds = calcBounds(currentStroke);
         myStrokes.push(JSON.parse(JSON.stringify(currentStroke)));
         socket.emit('draw_stroke', currentStroke); 
@@ -257,12 +299,29 @@ function handleEnd() {
     isDrawing = false; currentStroke.points = []; requestRedraw();
 }
 
-// Привязка мыши
 canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY, false, e));
 window.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY, e));
 window.addEventListener('mouseup', handleEnd);
 
-// Привязка пальцев (и щипка для зума)
+// === ЗУМ КОЛЕСИКОМ МЫШИ (НОВОЕ) ===
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const wBefore = getWorldPos(e.clientX, e.clientY);
+    
+    const zoomIntensity = 0.1;
+    if (e.deltaY < 0) camera.zoom = Math.min(camera.zoom * (1 + zoomIntensity), 10);
+    else camera.zoom = Math.max(camera.zoom * (1 - zoomIntensity), 0.1);
+    
+    const wAfter = getWorldPos(e.clientX, e.clientY);
+    
+    camera.x += (wAfter.x - wBefore.x) * camera.zoom;
+    camera.y += (wAfter.y - wBefore.y) * camera.zoom;
+    
+    updateStatusUI();
+    requestRedraw();
+}, { passive: false });
+
+
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault(); 
     if (e.touches.length === 2) {
@@ -276,20 +335,14 @@ window.addEventListener('touchmove', (e) => {
     e.preventDefault();
     if (e.touches.length === 2 && initialPinchDist) {
         const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-        
-        // Находим центр между двумя пальцами
         const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        
         const wBefore = getWorldPos(cx, cy);
         camera.zoom = Math.min(Math.max(0.1, initialZoom * (dist / initialPinchDist)), 10);
         const wAfter = getWorldPos(cx, cy);
-        
-        // Сдвигаем камеру
         camera.x += (wAfter.x - wBefore.x) * camera.zoom;
         camera.y += (wAfter.y - wBefore.y) * camera.zoom;
-        
-        updateStatusUI(); // Обновляем текст сразу!
+        updateStatusUI(); 
         requestRedraw();
     } else {
         handleMove(e.touches[0].clientX, e.touches[0].clientY, e);
@@ -298,22 +351,20 @@ window.addEventListener('touchmove', (e) => {
 
 window.addEventListener('touchend', (e) => { initialPinchDist = null; handleEnd(); });
 
-// === ГОРЯЧИЕ КЛАВИШИ ===
 window.addEventListener('keydown', (e) => {
     if(e.ctrlKey && e.key === 'z') { performUndo(); return; }
-    
-    // Фокус с инпутов снимаем, чтобы текст не писался туда
     if(document.activeElement.tagName === 'INPUT') return; 
 
     const key = e.key.toLowerCase();
     if (key === 'b') { mode = 'draw'; setTool('brush'); }
     if (key === 'e') { mode = 'draw'; setTool('eraser'); }
     if (key === 'r') { mode = 'draw'; setTool('rect'); }
+    if (key === 'c') { mode = 'draw'; setTool('circle'); } // Горячая клавиша C
+    if (key === 'l') { mode = 'draw'; setTool('line'); }   // Горячая клавиша L
     if (key === 'f') { mode = 'draw'; setTool('fill'); }
     if (key === 'i') { mode = 'draw'; setTool('picker'); }
     if (key === 'h') { document.getElementById('modePan').click(); }
     
-        // ЗУМ с клавиатуры (+, -, 0) относительно центра экрана
     if (key === '=' || key === '+' || key === '-' || key === '0') {
         const cx = window.innerWidth / 2;
         const cy = window.innerHeight / 2;
@@ -332,9 +383,9 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-// === UI КНОПКИ ===
 document.getElementById('mobileMenuToggle').addEventListener('click', (e) => { document.querySelector('.ui-left').classList.toggle('show'); });
 
+// ОБЩИЙ СТИЛЬ ДЛЯ КНОПОК РЕЖИМА
 document.getElementById('modeDraw').addEventListener('click', (e) => {
     mode = 'draw'; e.target.classList.add('active-mode'); document.getElementById('modePan').classList.remove('active-mode'); canvas.style.cursor = 'crosshair';
 });
@@ -342,27 +393,57 @@ document.getElementById('modePan').addEventListener('click', (e) => {
     mode = 'pan'; e.target.classList.add('active-mode'); document.getElementById('modeDraw').classList.remove('active-mode'); canvas.style.cursor = 'grab';
 });
 
-const toolBtns = { 'brush': document.getElementById('brushBtn'), 'rect': document.getElementById('rectBtn'), 'eraser': document.getElementById('eraserBtn'), 'fill': document.getElementById('fillBtn'), 'picker': document.getElementById('pickerBtn') };
+const toolBtns = { 
+    'brush': document.getElementById('brushBtn'), 
+    'rect': document.getElementById('rectBtn'), 
+    'circle': document.getElementById('circleBtn'), 
+    'line': document.getElementById('lineBtn'),
+    'eraser': document.getElementById('eraserBtn'), 
+    'fill': document.getElementById('fillBtn'), 
+    'picker': document.getElementById('pickerBtn') 
+};
+
 function setTool(newTool) {
     currentTool = newTool;
     for(let key in toolBtns) toolBtns[key].classList.remove('active-tool');
     toolBtns[newTool].classList.add('active-tool');
     if(mode !== 'draw') document.getElementById('modeDraw').click();
 }
-for (let k in toolBtns) {
-    toolBtns[k].addEventListener('click', () => setTool(k));
-}
+for (let k in toolBtns) toolBtns[k].addEventListener('click', () => setTool(k));
 
 document.getElementById('undoBtn').addEventListener('click', performUndo);
+
+// ЛОГИКА НОВОЙ ПАЛИТРЫ
+document.querySelectorAll('.swatch').forEach(sw => {
+    sw.addEventListener('click', (e) => {
+        myColor = e.target.getAttribute('data-c');
+        document.getElementById('colorPicker').value = myColor;
+        if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush');
+    });
+});
 document.getElementById('colorPicker').addEventListener('input', (e) => { myColor = e.target.value; if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush'); });
 document.getElementById('sizePicker').addEventListener('input', (e) => { mySize = e.target.value; });
 
+// === ФИКС СКАЧИВАНИЯ ДЛЯ FIREFOX (КРАШИ) ===
 document.getElementById('downloadBtn').addEventListener('click', () => {
     const tempCanvas = document.createElement('canvas'); tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
     const tCtx = tempCanvas.getContext('2d');
-    tCtx.fillStyle = currentBgColor; tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    
+    tCtx.fillStyle = '#ffffff'; // ХОЛСТ ВСЕГДА БЕЛЫЙ ПРИ СКАЧИВАНИИ
+    tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
     tCtx.drawImage(canvas, 0, 0);
-    const link = document.createElement('a'); link.download = 'Oeaki_Art.png'; link.href = tempCanvas.toDataURL('image/png'); link.click();
+    
+    tempCanvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a'); 
+        link.download = 'Oeaki_Art.png'; 
+        link.href = url; 
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        setTimeout(() => URL.revokeObjectURL(url), 100); // ОЧИСТКА ПАМЯТИ FIREFOX
+    }, 'image/png');
 });
 
 function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; updateStatusUI(); requestRedraw(); }
