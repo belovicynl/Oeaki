@@ -9,7 +9,7 @@ body { margin: 0; overflow: hidden; background-color: var(--bg-color); font-fami
 
 canvas { display: block; touch-action: none; position: absolute; top: 0; left: 0; z-index: 1; cursor: crosshair;}
 
-/* ПАНЕЛЬ НА ПК (Возвращено как было, слева сверху) */
+/* ПАНЕЛЬ НА ПК */
 .panel { background: var(--panel-bg); padding: 12px; border-radius: 4px; color: var(--text-color); position: absolute; pointer-events: auto; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); z-index: 10; border: 1px solid var(--border-color); }
 .ui-left { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 8px; width: 220px; max-width: calc(100vw - 40px); }
 
@@ -17,41 +17,55 @@ canvas { display: block; touch-action: none; position: absolute; top: 0; left: 0
 .mode-toggles { display: flex; gap: 5px; width: 100%; }
 .tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: 100%; }
 
-button { flex: 1; padding: 6px 4px; cursor: pointer; background: #fff; color: var(--text-color); border: 1px solid var(--border-color); border-radius: 2px; transition: 0.1s; font-weight: 600; font-size: 10px; text-transform: uppercase; white-space: nowrap; box-shadow: 1px 1px 0px rgba(0,0,0,0.05); filter: grayscale(100%); }
-button:hover { background: #eef; }
-button:active { transform: translateY(1px); box-shadow: none; }
+/* КНОПКИ (Исправлено затенение Android и убраны серые фильтры) */
+button { 
+    flex: 1; padding: 6px 4px; cursor: pointer; background: #fff; 
+    color: var(--text-color); border: 1px solid var(--border-color); 
+    border-radius: 4px; transition: 0.1s; font-weight: 600; font-size: 10px; 
+    text-transform: uppercase; white-space: nowrap; 
+    -webkit-tap-highlight-color: transparent; /* УБИРАЕТ СЕРУЮ ВСПЫШКУ НА ANDROID */
+    appearance: none; -webkit-appearance: none;
+}
+button:active { background: #e5e5e5; transform: scale(0.97); }
 
-.active-mode { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; filter: grayscale(0%) !important; }
-.active-tool { background: #ddd; border-color: #aaa; box-shadow: inset 1px 1px 3px rgba(0,0,0,0.1); }
+/* РЕЖИМЫ (Рисовать / Двигать) */
+.active-mode { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; }
+
+/* ИНСТРУМЕНТЫ (Светло-голубой фон вместо грязного серого) */
+.active-tool { background: #e0f0ff; border-color: var(--accent); color: #000; box-shadow: none; }
 
 /* СТАРАЯ ПАЛИТРА (ТОЛЬКО ДЛЯ ПК) */
 .desktop-palette input[type="color"] { width: 30px; height: 30px; padding: 0; border: 1px solid #aaa; border-radius: 2px; cursor: pointer;}
 .desktop-palette input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .desktop-palette input[type="color"]::-webkit-color-swatch { border: none; }
 
-/* НОВАЯ ПАЛИТРА (ТОЛЬКО ДЛЯ МОБИЛОК) */
-.custom-palette { display: flex; gap: 4px; flex-wrap: wrap; width: 94px; }
-.swatch { width: 20px; height: 20px; border: 1px solid #aaa; cursor: pointer; border-radius: 2px; box-sizing: border-box; }
-.swatch:hover { border-color: #333; transform: scale(1.1); }
-.swatch-native { width: 20px; height: 20px; border: 1px solid #aaa; border-radius: 2px; background: linear-gradient(to right, red, yellow, green, cyan, blue, magenta); position: relative; overflow: hidden; }
-.swatch-native input { position: absolute; top: -10px; left: -10px; width: 40px; height: 40px; opacity: 0; cursor: pointer; }
+/* НОВАЯ ПАЛИТРА (КВАДРАТЫ) */
+.custom-palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: 100%; justify-items: center; }
+.swatch { width: 28px; height: 28px; border: 1px solid #aaa; cursor: pointer; border-radius: 2px; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+.swatch:active { transform: scale(0.9); }
+.swatch-native { width: 28px; height: 28px; border: 1px solid #aaa; border-radius: 2px; background: linear-gradient(to right, red, yellow, lime, aqua, blue, magenta); position: relative; overflow: hidden; -webkit-tap-highlight-color: transparent; }
+.swatch-native input { position: absolute; top: -10px; left: -10px; width: 50px; height: 50px; opacity: 0; cursor: pointer; }
 
 .range-wrapper { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .range-wrapper label { font-size: 10px; color: #666; font-weight: bold; margin-bottom: 2px; }
-input[type="range"] { width: 100%; margin: 0; cursor: pointer; }
+
+/* ПОЛЗУНОК (Теперь всегда синий, а не зеленый) */
+input[type="range"] { width: 100%; margin: 0; cursor: pointer; accent-color: var(--accent); }
 
 .hint-text { font-size: 10px; color: #888; text-align: center; margin-top: 5px; font-weight: bold;}
 
-.mobile-menu-btn { display: none; position: absolute; top: 10px; right: 10px; z-index: 20; background: var(--panel-bg); border: 1px solid var(--border-color); width: 40px; height: 40px; border-radius: 4px; font-size: 20px; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); cursor: pointer; padding: 0; align-items: center; justify-content: center;}
+.mobile-menu-btn { display: none; position: absolute; z-index: 20; background: var(--panel-bg); border: 1px solid var(--border-color); width: 44px; height: 44px; border-radius: 50%; font-size: 20px; cursor: pointer; padding: 0; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent;}
 
 /* МЕДИАЗАПРОС: ПЕРЕКЛЮЧЕНИЕ ИНТЕРФЕЙСА НА ТЕЛЕФОНЕ */
 @media (max-width: 768px) {
-    .mobile-menu-btn { display: flex; }
-    /* Панель в правый нижний угол, БЕЗ ТЕНИ */
-    .ui-left { display: none; bottom: 10px; right: 10px; left: auto; top: auto; box-shadow: none !important; }
+    /* Кнопка вызова (Вниз вправо, без тени, круглая) */
+    .mobile-menu-btn { display: flex; top: auto; bottom: 15px; right: 15px; box-shadow: none; }
+    
+    /* Панель (Открывается над кнопкой, тень ЕСТЬ) */
+    .ui-left { display: none; top: auto; bottom: 70px; right: 15px; left: auto; }
     .ui-left.show { display: flex; }
     
     /* Меняем палитру */
     .desktop-palette { display: none !important; }
-    .mobile-palette { display: flex !important; }
+    .mobile-palette { display: flex !important; width: 100%; margin-bottom: 5px;}
 }

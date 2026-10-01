@@ -50,6 +50,7 @@ function updateStatusUI() {
     }
 }
 
+// === ОБНОВЛЕННАЯ ОТРИСОВКА (Эллипс как в Paint) ===
 function drawShape(context, stroke) {
     if (stroke.points.length < 2) return;
     context.globalCompositeOperation = stroke.isEraser ? 'destination-out' : 'source-over';
@@ -68,8 +69,12 @@ function drawShape(context, stroke) {
         context.rect(start.x, start.y, end.x - start.x, end.y - start.y);
         context.fill();
     } else if (stroke.type === 'circle') {
-        const radius = Math.hypot(end.x - start.x, end.y - start.y);
-        context.arc(start.x, start.y, radius, 0, Math.PI * 2);
+        // Вычисляем центр и радиусы эллипса по рамке (как в MS Paint)
+        const cx = (start.x + end.x) / 2;
+        const cy = (start.y + end.y) / 2;
+        const rx = Math.abs(end.x - start.x) / 2;
+        const ry = Math.abs(end.y - start.y) / 2;
+        context.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
         context.fill();
     } else if (stroke.type === 'line') {
         context.moveTo(start.x, start.y);
@@ -118,18 +123,15 @@ function renderCore() {
     redrawPending = false;
 }
 
+// === ОБНОВЛЕННАЯ ЗАЩИТА (Эллипс использует ту же рамку, что и квадрат) ===
 function calcBounds(stroke) {
-    if(stroke.type === 'rect') {
+    // Теперь логика габаритов круга и квадрата абсолютно одинаковая!
+    if(stroke.type === 'rect' || stroke.type === 'circle') {
         const start = stroke.points[0], end = stroke.points[stroke.points.length-1];
         return { 
             minX: Math.min(start.x, end.x), maxX: Math.max(start.x, end.x), 
             minY: Math.min(start.y, end.y), maxY: Math.max(start.y, end.y) 
         };
-    }
-    if (stroke.type === 'circle') {
-        const start = stroke.points[0], end = stroke.points[stroke.points.length-1];
-        const r = Math.hypot(end.x - start.x, end.y - start.y);
-        return { minX: start.x - r, maxX: start.x + r, minY: start.y - r, maxY: start.y + r };
     }
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     stroke.points.forEach(p => {
@@ -185,7 +187,7 @@ function pickColor(x, y) {
     updateGlobalColor(hex); // ОБНОВЛЕНО
 }
 
-// Вспомогательные функции для математической заливки
+// Вспомогательные функции для заливки
 function sqr(x) { return x * x; }
 function dist2(v, w) { return sqr(v.x - w.x) + sqr(v.y - w.y); }
 function distToSegmentSquared(p, v, w) {
@@ -196,9 +198,8 @@ function distToSegmentSquared(p, v, w) {
     return dist2(p, { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) });
 }
 
-// НОВАЯ МАТЕМАТИЧЕСКАЯ ЗАЛИВКА
+// === ОБНОВЛЕННАЯ ЗАЛИВКА (Понимает форму эллипса) ===
 function handleFill(worldPos) {
-    // Идем с конца, чтобы кликать по самым "верхним" слоям рисунка
     for (let i = myStrokes.length - 1; i >= 0; i--) {
         const s = myStrokes[i];
         if (s.points.length < 2) continue;
@@ -207,7 +208,6 @@ function handleFill(worldPos) {
         const end = s.points[s.points.length - 1];
         let hit = false;
 
-        // Попали ли мы в квадрат?
         if (s.type === 'rect') {
             const minX = Math.min(start.x, end.x);
             const maxX = Math.max(start.x, end.x);
@@ -215,15 +215,21 @@ function handleFill(worldPos) {
             const maxY = Math.max(start.y, end.y);
             hit = (worldPos.x >= minX && worldPos.x <= maxX && worldPos.y >= minY && worldPos.y <= maxY);
         } 
-        // Попали ли мы в круг?
         else if (s.type === 'circle') {
-            const radius = Math.hypot(end.x - start.x, end.y - start.y);
-            const dist = Math.hypot(worldPos.x - start.x, worldPos.y - start.y);
-            hit = (dist <= radius);
+            // Формула попадания точки в эллипс
+            const cx = (start.x + end.x) / 2;
+            const cy = (start.y + end.y) / 2;
+            const rx = Math.abs(end.x - start.x) / 2;
+            const ry = Math.abs(end.y - start.y) / 2;
+            
+            if (rx > 0 && ry > 0) {
+                const dx = worldPos.x - cx;
+                const dy = worldPos.y - cy;
+                hit = ((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry)) <= 1;
+            }
         } 
-        // Попали ли мы по линии/кисти?
         else {
-            const threshold2 = sqr(s.size / 2 + 2); // Точный расчет толщины линии (+2px для легкого клика)
+            const threshold2 = sqr(s.size / 2 + 2); 
             for (let j = 0; j < s.points.length - 1; j++) {
                 if (distToSegmentSquared(worldPos, s.points[j], s.points[j+1]) <= threshold2) {
                     hit = true;
@@ -232,12 +238,11 @@ function handleFill(worldPos) {
             }
         }
 
-        // Если клик успешный — красим именно эту фигуру и отправляем по сети
         if (hit) {
             s.color = myColor; 
             socket.emit('update_stroke_color', { strokeId: s.strokeId, color: myColor });
             requestRedraw();
-            return; // Красим только одну фигуру (верхнюю) и останавливаемся
+            return; 
         }
     }
 }
