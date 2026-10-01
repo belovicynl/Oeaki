@@ -4,66 +4,44 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Oeaki</title>
-    <!-- Подключаем наш файл стилей -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <button id="mobileMenuToggle" class="mobile-menu-btn">🎨 ИНСТРУМЕНТЫ</button>
+    <button id="mobileMenuToggle" class="mobile-menu-btn">🎨&#xFE0E;</button>
 
     <div class="panel ui-left">
         <div class="mode-toggles">
-            <button id="modeDraw" class="active-mode">✎ Рисовать</button>
-            <button id="modePan">✋&#xFE0E; Двигать</button>
+            <button id="modeDraw" class="active-mode" title="Рисовать">✎&#xFE0E; РИСОВАТЬ</button>
+            <button id="modePan" title="Двигать (H)">✋&#xFE0E; ДВИГАТЬ</button>
         </div>
         
         <div class="row">
             <div class="range-wrapper" style="flex: 0 0 auto;">
                 <label>Цвет</label>
-                <input type="color" id="colorPicker" value="#0088ff">
+                <input type="color" id="colorPicker" value="#000000">
             </div>
             <div class="range-wrapper">
                 <label>Толщина</label>
-                <input type="range" id="sizePicker" min="1" max="50" value="5">
+                <input type="range" id="sizePicker" min="1" max="50" value="3">
             </div>
         </div>
 
         <div class="tool-grid">
-            <button id="brushBtn" class="active-tool">Кисть</button>
-            <button id="rectBtn"><span style="font-size: 16px;">■</span> Квадрат</button>
-            <button id="eraserBtn">Ластик</button>
-            <button id="pickerBtn">Пипетка</button>
+            <button id="brushBtn" class="active-tool" title="Кисть (B)">🖌&#xFE0E; КИСТЬ</button>
+            <button id="rectBtn" title="Квадрат (R)">■&#xFE0E; КВАДРАТ</button>
+            <button id="eraserBtn" title="Ластик (E)">▱&#xFE0E; ЛАСТИК</button>
+            <button id="fillBtn" title="Заливка (F)">🪣&#xFE0E; ЗАЛИВКА</button>
+            <button id="pickerBtn" title="Пипетка (I)" style="grid-column: span 2;">💉&#xFE0E; ПИПЕТКА</button>
         </div>
 
-        <div class="row">
-            <div class="range-wrapper">
-                <label>Цвет холста</label>
-                <input type="color" id="bgColorPicker" value="#ffffff" style="width: 100%; height: 20px;">
-            </div>
-        </div>
-
-        <button id="downloadBtn" style="background: #2a2a2a; margin-top: 5px;">📷 Скачать холст</button>
-    </div>
-
-    <div class="panel ui-right">
-        <div id="onlineCounter" style="font-weight: bold; margin-bottom: 10px; color: #00E676; font-size: 13px;">Онлайн: 1</div>
-        <div class="user-item" style="border-bottom: 2px solid #555; padding-bottom: 8px; margin-bottom: 5px;">
-            <input type="checkbox" id="hideOthersGlobal">
-            <label style="color: #ffaa00; font-weight: bold;">Скрыть чужое</label>
-        </div>
-        <div style="font-size: 10px; color: #aaa; margin-bottom: 5px;">Галочка = видно:</div>
-        <div id="usersList"></div>
-    </div>
-
-    <div class="panel ui-bottom">
-        <button id="zoomOut">➖</button>
-        <span id="zoomDisplay">100%</span>
-        <button id="zoomIn">➕</button>
-        <button id="zoomReset" style="margin-left: 10px;">Сброс</button>
+        <button id="undoBtn" style="background: #e0e0e0; color: #333; margin-top: 5px;" title="Отмена (Ctrl+Z)">↩&#xFE0E; ОТМЕНА</button>
+        <button id="downloadBtn" style="background: #e0e0e0; color: #333; margin-top: 5px;">💾&#xFE0E; СКАЧАТЬ</button>
+        
+        <div class="hint-text">Зум: + / - / 0</div>
     </div>
 
     <canvas id="board"></canvas>
 
-    <!-- Сначала сокеты, потом наша логика -->
     <script src="/socket.io/socket.io.js"></script>
     <script src="main.js"></script>
 </body>

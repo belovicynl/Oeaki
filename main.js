@@ -2,31 +2,42 @@ const socket = io();
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-// === ПЕРЕМЕННЫЕ ===
 let redrawPending = false; 
 let myId = null;
 let mode = 'draw'; 
-let currentTool = 'brush'; // 'brush', 'rect', 'eraser', 'picker'
+let currentTool = 'brush'; 
 
-let myColor = "#0088ff";
-let mySize = 5;
+let myColor = "#000000";
+let mySize = 3;
 let currentBgColor = "#ffffff";
-let hideOthersGlobal = false;
-let hiddenUsers = new Set(); 
 
 let myStrokes = [];
 let othersStrokes = [];
 let otherCursors = {}; 
 
-let camera = { x: window.innerWidth / 2, y: window.innerHeight / 2, zoom: 1 };
+// Случайный спавн при входе (радиус 2000px)
+const spawnRadius = 2000;
+const randomAngle = Math.random() * Math.PI * 2;
+const randomDist = Math.random() * spawnRadius;
+let camera = { 
+    x: (window.innerWidth / 2) - (Math.cos(randomAngle) * randomDist), 
+    y: (window.innerHeight / 2) - (Math.sin(randomAngle) * randomDist), 
+    zoom: 1 
+};
+
 let isPanning = false;
 let isDrawing = false;
 let panStart = { x: 0, y: 0 };
 let currentStroke = { type: 'brush', points: [] };
-
 let lastCursorSend = 0;
 
-// === БАЗОВЫЕ ФУНКЦИИ ===
+// Для Pinch-to-zoom на телефоне
+let initialPinchDist = null;
+let initialZoom = 1;
+
+// Генератор уникальных ID для отмены (Undo)
+function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
+
 function getWorldPos(screenX, screenY) {
     return {
         x: (screenX - camera.x) / camera.zoom,
@@ -34,16 +45,9 @@ function getWorldPos(screenX, screenY) {
     };
 }
 
-function requestRedraw() {
-    if (!redrawPending) {
-        redrawPending = true;
-        requestAnimationFrame(renderCore);
-    }
-}
-
+// === РЕНДЕР И ОТРИСОВКА ===
 function drawShape(context, stroke) {
     if (stroke.points.length < 2) return;
-    
     context.globalCompositeOperation = stroke.isEraser ? 'destination-out' : 'source-over';
     context.fillStyle = stroke.color;
     context.strokeStyle = stroke.isEraser ? 'rgba(0,0,0,1)' : stroke.color;
@@ -53,19 +57,21 @@ function drawShape(context, stroke) {
 
     if (stroke.type === 'rect') {
         const start = stroke.points[0];
-        const end = stroke.points[stroke.points.length - 1];
+        const end = stroke.points[1];
         context.beginPath();
         context.rect(start.x, start.y, end.x - start.x, end.y - start.y);
         context.fill();
     } else {
         context.beginPath();
         context.moveTo(stroke.points[0].x, stroke.points[0].y);
-        for (let i = 1; i < stroke.points.length; i++) {
-            context.lineTo(stroke.points[i].x, stroke.points[i].y);
-        }
+        for (let i = 1; i < stroke.points.length; i++) context.lineTo(stroke.points[i].x, stroke.points[i].y);
         context.stroke();
     }
     context.globalCompositeOperation = 'source-over';
+}
+
+function requestRedraw() {
+    if (!redrawPending) { redrawPending = true; requestAnimationFrame(renderCore); }
 }
 
 function renderCore() {
@@ -74,20 +80,14 @@ function renderCore() {
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.zoom, camera.zoom);
 
-    if (!hideOthersGlobal) {
-        othersStrokes.forEach(stroke => {
-            if (stroke.userId !== myId && !hiddenUsers.has(stroke.userId)) drawShape(ctx, stroke);
-        });
-    }
+    // Чужие рисунки
+    othersStrokes.forEach(stroke => drawShape(ctx, stroke));
 
+    // Свои рисунки (на скрытом холсте для правильной работы ластика)
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
     const tCtx = tempCanvas.getContext('2d');
-    
-    tCtx.save();
-    tCtx.translate(camera.x, camera.y);
-    tCtx.scale(camera.zoom, camera.zoom);
-    
+    tCtx.save(); tCtx.translate(camera.x, camera.y); tCtx.scale(camera.zoom, camera.zoom);
     myStrokes.forEach(stroke => drawShape(tCtx, stroke));
     if (currentStroke.points.length > 0) drawShape(tCtx, currentStroke);
     tCtx.restore();
@@ -95,139 +95,139 @@ function renderCore() {
     ctx.restore(); 
     ctx.drawImage(tempCanvas, 0, 0);
 
-    ctx.save();
-    ctx.translate(camera.x, camera.y);
-    ctx.scale(camera.zoom, camera.zoom);
-    if (!hideOthersGlobal) {
-        for (let id in otherCursors) {
-            if (hiddenUsers.has(id) || id === myId) continue; 
-            const c = otherCursors[id];
-            ctx.beginPath();
-            ctx.arc(c.x, c.y, 5 / camera.zoom, 0, Math.PI * 2);
-            ctx.fillStyle = c.color;
-            ctx.fill();
-        }
+    ctx.save(); ctx.translate(camera.x, camera.y); ctx.scale(camera.zoom, camera.zoom);
+    for (let id in otherCursors) {
+        if (id === myId) continue;
+        const c = otherCursors[id];
+        ctx.beginPath(); ctx.arc(c.x, c.y, 4 / camera.zoom, 0, Math.PI * 2); ctx.fillStyle = c.color; ctx.fill();
     }
     ctx.restore();
 
     redrawPending = false;
 }
 
-function updateZoomDisplay() {
-    document.getElementById('zoomDisplay').innerText = Math.round(camera.zoom * 100) + '%';
+// === АНТИ-ВАНДАЛИЗМ (Приватные зоны) ===
+function calcBounds(stroke) {
+    if(stroke.type === 'rect') {
+        const x1 = stroke.points[0].x, x2 = stroke.points[1].x;
+        const y1 = stroke.points[0].y, y2 = stroke.points[1].y;
+        return { minX: Math.min(x1, x2), maxX: Math.max(x1, x2), minY: Math.min(y1, y2), maxY: Math.max(y1, y2) };
+    }
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    stroke.points.forEach(p => {
+        if(p.x < minX) minX = p.x; if(p.x > maxX) maxX = p.x;
+        if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
+    });
+    return { minX, maxX, minY, maxY };
+}
+
+function isPositionProtected(x, y) {
+    const SAFE_ZONE = 30; // 30px защитное поле вокруг чужого
+    for (let i = othersStrokes.length - 1; i >= 0; i--) {
+        const b = othersStrokes[i].bounds;
+        if (!b) continue;
+        if (x >= b.minX - SAFE_ZONE && x <= b.maxX + SAFE_ZONE && y >= b.minY - SAFE_ZONE && y <= b.maxY + SAFE_ZONE) {
+            return true; // Зона занята
+        }
+    }
+    return false;
 }
 
 // === СОКЕТЫ ===
 socket.on('init_canvas', (data) => { 
     myId = data.myId; 
-    othersStrokes = [];
-    myStrokes = [];
+    othersStrokes = []; myStrokes = [];
     data.strokes.forEach(s => {
-        if(s.userId === myId) myStrokes.push(s);
-        else othersStrokes.push(s);
+        if (!s.strokeId) s.strokeId = 'legacy_' + Math.random().toString(36);
+	s.bounds = calcBounds(s); // Предрасчет габаритов
+        if(s.userId === myId) myStrokes.push(s); else othersStrokes.push(s);
     });
     requestRedraw(); 
 });
 
-socket.on('new_stroke', (stroke) => { othersStrokes.push(stroke); requestRedraw(); });
-socket.on('wipe_canvas', () => { myStrokes = []; othersStrokes = []; requestRedraw(); });
+socket.on('new_stroke', (stroke) => { stroke.bounds = calcBounds(stroke); othersStrokes.push(stroke); requestRedraw(); });
+socket.on('wipe_canvas', () => { myStrokes = []; othersStrokes = []; document.body.style.backgroundColor = '#ffffff'; requestRedraw(); });
 socket.on('cursor_update', (data) => { otherCursors[data.id] = data; requestRedraw(); });
 socket.on('cursor_remove', (id) => { delete otherCursors[id]; requestRedraw(); });
 
-socket.on('update_users', (users) => {
-    const listDiv = document.getElementById('usersList');
-    if(!listDiv) return;
-    listDiv.innerHTML = '';
-    let count = 0;
-
-    for (let id in users) {
-        count++;
-        if (id === myId) continue; 
-
-        const div = document.createElement('div');
-        div.className = 'user-item';
-        
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = !hiddenUsers.has(id); 
-        
-        checkbox.addEventListener('change', (e) => {
-            if (e.target.checked) hiddenUsers.delete(id);
-            else hiddenUsers.add(id);
-            requestRedraw(); 
-        });
-
-        const label = document.createElement('label');
-        label.innerText = 'Игрок ' + id; 
-
-        div.appendChild(checkbox);
-        div.appendChild(label);
-        listDiv.appendChild(div);
-    }
-    document.getElementById('onlineCounter').innerText = `Онлайн: ${count}`;
+socket.on('remove_stroke', (strokeId) => {
+    othersStrokes = othersStrokes.filter(s => s.strokeId !== strokeId);
+    requestRedraw();
+});
+socket.on('stroke_color_changed', (data) => {
+    const s = othersStrokes.find(s => s.strokeId === data.strokeId);
+    if(s) s.color = data.color;
+    requestRedraw();
 });
 
-// === ИСПРАВЛЕННАЯ ПИПЕТКА ===
-function rgbToHex(r, g, b) {
-    // Надежный способ перевода в HEX с сохранением нулей
-    return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1);
+// === ИНСТРУМЕНТЫ (Пипетка, Заливка, Отмена) ===
+function rgbToHex(r, g, b) { return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1); }
+
+function pickColor(x, y) {
+    const px = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
+    const hex = px[3] === 0 ? currentBgColor : rgbToHex(px[0], px[1], px[2]);
+    document.getElementById('colorPicker').value = hex; myColor = hex;
+    setTool('brush');
 }
 
-function pickColor(clientX, clientY) {
-    const pixelData = ctx.getImageData(Math.round(clientX), Math.round(clientY), 1, 1).data;
-    if(pixelData[3] === 0) { // Если пиксель прозрачный, берем цвет фона
-        document.getElementById('colorPicker').value = currentBgColor;
-        myColor = currentBgColor;
-    } else {
-        const hex = rgbToHex(pixelData[0], pixelData[1], pixelData[2]);
-        document.getElementById('colorPicker').value = hex;
-        myColor = hex;
+function handleFill(worldPos) {
+    // Проверяем клик по СВОИМ прямоугольникам (с конца, чтобы брать верхние)
+    for (let i = myStrokes.length - 1; i >= 0; i--) {
+        const s = myStrokes[i];
+        if (s.type === 'rect') {
+            const minX = Math.min(s.points[0].x, s.points[1].x); const maxX = Math.max(s.points[0].x, s.points[1].x);
+            const minY = Math.min(s.points[0].y, s.points[1].y); const maxY = Math.max(s.points[0].y, s.points[1].y);
+            if (worldPos.x >= minX && worldPos.x <= maxX && worldPos.y >= minY && worldPos.y <= maxY) {
+                s.color = myColor; // Перекрашиваем
+                socket.emit('update_stroke_color', { strokeId: s.strokeId, color: myColor });
+                requestRedraw();
+                return;
+            }
+        }
     }
-    setTool('brush'); // Сразу возвращаемся на кисть
+    // Если мимо квадратов — заливаем свой локальный фон
+    currentBgColor = myColor;
+    document.body.style.backgroundColor = currentBgColor;
+}
+
+function performUndo() {
+    if(myStrokes.length > 0) {
+        const removed = myStrokes.pop();
+        socket.emit('undo_stroke', removed.strokeId);
+        requestRedraw();
+    }
 }
 
 // === УПРАВЛЕНИЕ ===
 function handleStart(clientX, clientY, isTouch, e) {
-    if (mode === 'pan' || (!isTouch && e.button === 1) || (isTouch && e.touches && e.touches.length > 1)) {
-        isPanning = true;
-        panStart = { x: clientX - camera.x, y: clientY - camera.y };
-        canvas.style.cursor = 'grabbing';
+    if (mode === 'pan' || (!isTouch && e.button === 1)) {
+        isPanning = true; panStart = { x: clientX - camera.x, y: clientY - camera.y }; canvas.style.cursor = 'grabbing';
     } 
     else if (mode === 'draw' && (isTouch || e.button === 0)) {
-        if (currentTool === 'picker') {
-            pickColor(clientX, clientY);
-            return;
-        }
+        const worldPos = getWorldPos(clientX, clientY);
+        
+        if (currentTool === 'picker') { pickColor(clientX, clientY); return; }
+        if (currentTool === 'fill') { handleFill(worldPos); return; }
+        
+        // Проверка привата! Если кликаем в чужую зону — блок.
+        if (isPositionProtected(worldPos.x, worldPos.y)) return;
 
         isDrawing = true;
-        const worldPos = getWorldPos(clientX, clientY);
-        currentStroke = { 
-            type: currentTool === 'rect' ? 'rect' : 'brush', 
-            points: [worldPos], 
-            color: myColor, 
-            size: mySize, 
-            isEraser: currentTool === 'eraser' 
-        };
+        currentStroke = { strokeId: generateId(), type: currentTool === 'rect' ? 'rect' : 'brush', points: [worldPos], color: myColor, size: mySize, isEraser: currentTool === 'eraser' };
     }
 }
 
 function handleMove(clientX, clientY, e) {
-    if (isPanning) {
-        camera.x = clientX - panStart.x;
-        camera.y = clientY - panStart.y;
-        requestRedraw();
-        return;
-    }
+    if (isPanning) { camera.x = clientX - panStart.x; camera.y = clientY - panStart.y; requestRedraw(); return; }
 
     if(e.target === canvas) {
         const worldPos = getWorldPos(clientX, clientY);
         const now = Date.now();
-        if (now - lastCursorSend > 30) {
-            socket.emit('cursor_move', { x: worldPos.x, y: worldPos.y, color: currentTool === 'eraser' ? '#aaaaaa' : myColor });
-            lastCursorSend = now;
-        }
+        if (now - lastCursorSend > 30) { socket.emit('cursor_move', { x: worldPos.x, y: worldPos.y, color: currentTool === 'eraser' ? '#aaaaaa' : myColor }); lastCursorSend = now; }
 
         if (isDrawing) {
+            // Если в процессе рисования линия залезла в чужой приват - обрываем линию
+            if (isPositionProtected(worldPos.x, worldPos.y)) { handleEnd(); return; }
             currentStroke.points.push(worldPos);
             requestRedraw();
         }
@@ -235,143 +235,99 @@ function handleMove(clientX, clientY, e) {
 }
 
 function handleEnd() {
-    if (isPanning) {
-        isPanning = false;
-        canvas.style.cursor = mode === 'pan' ? 'grab' : 'crosshair';
-    }
+    if (isPanning) { isPanning = false; canvas.style.cursor = mode === 'pan' ? 'grab' : 'crosshair'; }
     if (isDrawing && currentStroke.points.length > 1) {
-        if(currentStroke.type === 'rect') {
-            currentStroke.points = [currentStroke.points[0], currentStroke.points[currentStroke.points.length-1]];
-        }
+        if(currentStroke.type === 'rect') currentStroke.points = [currentStroke.points[0], currentStroke.points[currentStroke.points.length-1]];
+        currentStroke.bounds = calcBounds(currentStroke);
         myStrokes.push(JSON.parse(JSON.stringify(currentStroke)));
         socket.emit('draw_stroke', currentStroke); 
     }
-    isDrawing = false;
-    currentStroke.points = [];
-    requestRedraw();
+    isDrawing = false; currentStroke.points = []; requestRedraw();
 }
 
+// Привязка мыши
 canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY, false, e));
 window.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY, e));
 window.addEventListener('mouseup', handleEnd);
 
+// Привязка пальцев (и щипка для зума)
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault(); 
-    handleStart(e.touches[0].clientX, e.touches[0].clientY, true, e);
+    if (e.touches.length === 2) {
+        isDrawing = false; initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); initialZoom = camera.zoom;
+    } else {
+        handleStart(e.touches[0].clientX, e.touches[0].clientY, true, e);
+    }
 }, { passive: false });
 
 window.addEventListener('touchmove', (e) => {
-    if(e.target === canvas) e.preventDefault();
-    handleMove(e.touches[0].clientX, e.touches[0].clientY, e);
+    e.preventDefault();
+    if (e.touches.length === 2 && initialPinchDist) {
+        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        camera.zoom = Math.min(Math.max(0.1, initialZoom * (dist / initialPinchDist)), 10);
+        requestRedraw();
+    } else {
+        handleMove(e.touches[0].clientX, e.touches[0].clientY, e);
+    }
 }, { passive: false });
 
-window.addEventListener('touchend', handleEnd);
+window.addEventListener('touchend', (e) => { initialPinchDist = null; handleEnd(); });
 
-canvas.addEventListener('wheel', (e) => {
-    const zoomSpeed = 0.1;
-    const worldPosBefore = getWorldPos(e.clientX, e.clientY);
+// === ГОРЯЧИЕ КЛАВИШИ ===
+window.addEventListener('keydown', (e) => {
+    if(e.ctrlKey && e.key === 'z') { performUndo(); return; }
     
-    if (e.deltaY < 0) camera.zoom *= (1 + zoomSpeed);
-    else camera.zoom /= (1 + zoomSpeed);
-    
-    camera.zoom = Math.min(Math.max(0.1, camera.zoom), 10);
-    updateZoomDisplay();
-    
-    const worldPosAfter = getWorldPos(e.clientX, e.clientY);
-    camera.x += (worldPosAfter.x - worldPosBefore.x) * camera.zoom;
-    camera.y += (worldPosAfter.y - worldPosBefore.y) * camera.zoom;
-    
-    requestRedraw();
-});
+    // Фокус с инпутов снимаем, чтобы текст не писался туда
+    if(document.activeElement.tagName === 'INPUT') return; 
 
-// === ИНТЕРФЕЙС ===
-document.getElementById('mobileMenuToggle').addEventListener('click', (e) => {
-    const panel = document.querySelector('.ui-left');
-    panel.classList.toggle('show');
-    if(panel.classList.contains('show')) {
-        e.target.innerText = '❌ ЗАКРЫТЬ';
-        e.target.style.background = '#ff4444';
-    } else {
-        e.target.innerText = '🎨 ИНСТРУМЕНТЫ';
-        e.target.style.background = '#333';
+    const key = e.key.toLowerCase();
+    if (key === 'b') { mode = 'draw'; setTool('brush'); }
+    if (key === 'e') { mode = 'draw'; setTool('eraser'); }
+    if (key === 'r') { mode = 'draw'; setTool('rect'); }
+    if (key === 'f') { mode = 'draw'; setTool('fill'); }
+    if (key === 'i') { mode = 'draw'; setTool('picker'); }
+    if (key === 'h') { document.getElementById('modePan').click(); }
+    
+    // ЗУМ с клавиатуры (+, -, 0)
+    if (key === '=' || key === '+') { camera.zoom = Math.min(camera.zoom * 1.2, 10); requestRedraw(); }
+    if (key === '-') { camera.zoom = Math.max(camera.zoom / 1.2, 0.1); requestRedraw(); }
+    if (key === '0') { 
+        // Сброс зума, НО остаемся в тех координатах мира, где стояли
+        camera.zoom = 1; requestRedraw(); 
     }
 });
 
+// === UI КНОПКИ ===
+document.getElementById('mobileMenuToggle').addEventListener('click', (e) => { document.querySelector('.ui-left').classList.toggle('show'); });
+
 document.getElementById('modeDraw').addEventListener('click', (e) => {
-    mode = 'draw';
-    e.target.classList.add('active-mode');
-    document.getElementById('modePan').classList.remove('active-mode');
-    canvas.style.cursor = 'crosshair';
+    mode = 'draw'; e.target.classList.add('active-mode'); document.getElementById('modePan').classList.remove('active-mode'); canvas.style.cursor = 'crosshair';
 });
-
 document.getElementById('modePan').addEventListener('click', (e) => {
-    mode = 'pan';
-    e.target.classList.add('active-mode');
-    document.getElementById('modeDraw').classList.remove('active-mode');
-    canvas.style.cursor = 'grab';
+    mode = 'pan'; e.target.classList.add('active-mode'); document.getElementById('modeDraw').classList.remove('active-mode'); canvas.style.cursor = 'grab';
 });
 
-const toolBtns = {
-    'brush': document.getElementById('brushBtn'),
-    'rect': document.getElementById('rectBtn'),
-    'eraser': document.getElementById('eraserBtn'),
-    'picker': document.getElementById('pickerBtn')
-};
-
+const toolBtns = { 'brush': document.getElementById('brushBtn'), 'rect': document.getElementById('rectBtn'), 'eraser': document.getElementById('eraserBtn'), 'fill': document.getElementById('fillBtn'), 'picker': document.getElementById('pickerBtn') };
 function setTool(newTool) {
     currentTool = newTool;
     for(let key in toolBtns) toolBtns[key].classList.remove('active-tool');
     toolBtns[newTool].classList.add('active-tool');
-    if(mode === 'draw') canvas.style.cursor = 'crosshair';
+    if(mode !== 'draw') document.getElementById('modeDraw').click();
 }
+for(let k in toolBtns) toolBtns[key = k].addEventListener('click', () => setTool(key));
 
-toolBtns['brush'].addEventListener('click', () => setTool('brush'));
-toolBtns['rect'].addEventListener('click', () => setTool('rect'));
-toolBtns['eraser'].addEventListener('click', () => setTool('eraser'));
-toolBtns['picker'].addEventListener('click', () => setTool('picker'));
-
-document.getElementById('colorPicker').addEventListener('input', (e) => { 
-    myColor = e.target.value; 
-    if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush');
-});
-
-document.getElementById('bgColorPicker').addEventListener('input', (e) => { 
-    currentBgColor = e.target.value; 
-    document.body.style.backgroundColor = currentBgColor; 
-});
-
+document.getElementById('undoBtn').addEventListener('click', performUndo);
+document.getElementById('colorPicker').addEventListener('input', (e) => { myColor = e.target.value; if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush'); });
 document.getElementById('sizePicker').addEventListener('input', (e) => { mySize = e.target.value; });
 
-document.getElementById('hideOthersGlobal').addEventListener('change', (e) => {
-    hideOthersGlobal = e.target.checked;
-    requestRedraw();
-});
-
-document.getElementById('zoomIn').addEventListener('click', () => { camera.zoom = Math.min(camera.zoom * 1.5, 10); updateZoomDisplay(); requestRedraw(); });
-document.getElementById('zoomOut').addEventListener('click', () => { camera.zoom = Math.max(camera.zoom / 1.5, 0.1); updateZoomDisplay(); requestRedraw(); });
-document.getElementById('zoomReset').addEventListener('click', () => { camera.zoom = 1; camera.x = window.innerWidth / 2; camera.y = window.innerHeight / 2; updateZoomDisplay(); requestRedraw(); });
-
 document.getElementById('downloadBtn').addEventListener('click', () => {
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = canvas.width;
-    tempCanvas.height = canvas.height;
+    const tempCanvas = document.createElement('canvas'); tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
     const tCtx = tempCanvas.getContext('2d');
-    
-    tCtx.fillStyle = currentBgColor;
-    tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    tCtx.fillStyle = currentBgColor; tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
     tCtx.drawImage(canvas, 0, 0);
-
-    const link = document.createElement('a');
-    link.download = 'Oeaki_Art.jpg';
-    link.href = tempCanvas.toDataURL('image/jpeg', 0.9);
-    link.click();
+    const link = document.createElement('a'); link.download = 'Oeaki_Art.png'; link.href = tempCanvas.toDataURL('image/png'); link.click();
 });
 
-// === ИНИЦИАЛИЗАЦИЯ ===
-function resizeCanvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    requestRedraw();
-}
+function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; requestRedraw(); }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
