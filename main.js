@@ -185,40 +185,59 @@ function pickColor(x, y) {
     updateGlobalColor(hex); // ОБНОВЛЕНО
 }
 
+// Вспомогательные функции для математической заливки
+function sqr(x) { return x * x; }
+function dist2(v, w) { return sqr(v.x - w.x) + sqr(v.y - w.y); }
+function distToSegmentSquared(p, v, w) {
+    let l2 = dist2(v, w);
+    if (l2 === 0) return dist2(p, v);
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return dist2(p, { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) });
+}
+
+// НОВАЯ МАТЕМАТИЧЕСКАЯ ЗАЛИВКА
 function handleFill(worldPos) {
-    const tCanvas = document.createElement('canvas');
-    const tCtx = tCanvas.getContext('2d');
-    
+    // Идем с конца, чтобы кликать по самым "верхним" слоям рисунка
     for (let i = myStrokes.length - 1; i >= 0; i--) {
         const s = myStrokes[i];
         if (s.points.length < 2) continue;
         
-        tCtx.beginPath();
         const start = s.points[0];
         const end = s.points[s.points.length - 1];
         let hit = false;
 
+        // Попали ли мы в квадрат?
         if (s.type === 'rect') {
-            tCtx.rect(start.x, start.y, end.x - start.x, end.y - start.y);
-            hit = tCtx.isPointInPath(worldPos.x, worldPos.y);
-        } else if (s.type === 'circle') {
+            const minX = Math.min(start.x, end.x);
+            const maxX = Math.max(start.x, end.x);
+            const minY = Math.min(start.y, end.y);
+            const maxY = Math.max(start.y, end.y);
+            hit = (worldPos.x >= minX && worldPos.x <= maxX && worldPos.y >= minY && worldPos.y <= maxY);
+        } 
+        // Попали ли мы в круг?
+        else if (s.type === 'circle') {
             const radius = Math.hypot(end.x - start.x, end.y - start.y);
-            tCtx.arc(start.x, start.y, radius, 0, Math.PI * 2);
-            hit = tCtx.isPointInPath(worldPos.x, worldPos.y);
-        } else {
-            tCtx.lineWidth = s.size;
-            tCtx.lineCap = 'round';
-            tCtx.lineJoin = 'round';
-            tCtx.moveTo(s.points[0].x, s.points[0].y);
-            for (let j = 1; j < s.points.length; j++) tCtx.lineTo(s.points[j].x, s.points[j].y);
-            hit = tCtx.isPointInStroke(worldPos.x, worldPos.y);
+            const dist = Math.hypot(worldPos.x - start.x, worldPos.y - start.y);
+            hit = (dist <= radius);
+        } 
+        // Попали ли мы по линии/кисти?
+        else {
+            const threshold2 = sqr(s.size / 2 + 2); // Точный расчет толщины линии (+2px для легкого клика)
+            for (let j = 0; j < s.points.length - 1; j++) {
+                if (distToSegmentSquared(worldPos, s.points[j], s.points[j+1]) <= threshold2) {
+                    hit = true;
+                    break;
+                }
+            }
         }
 
+        // Если клик успешный — красим именно эту фигуру и отправляем по сети
         if (hit) {
             s.color = myColor; 
             socket.emit('update_stroke_color', { strokeId: s.strokeId, color: myColor });
             requestRedraw();
-            return;
+            return; // Красим только одну фигуру (верхнюю) и останавливаемся
         }
     }
 }

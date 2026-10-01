@@ -23,7 +23,7 @@ if (mongoUri) {
         .catch(err => console.error('❌ Ошибка подключения к БД:', err));
 }
 
-// === СХЕМА БД (Добавлен strokeId для функции Отмены) ===
+// === СХЕМА БД ===
 const StrokeSchema = new mongoose.Schema({
     strokeId: { type: String },
     type: { type: String, default: 'brush' }, 
@@ -35,19 +35,7 @@ const StrokeSchema = new mongoose.Schema({
 });
 const Stroke = mongoose.model('Stroke', StrokeSchema);
 
-// === БАМПЛИМИТ ===
-const MAX_MEMORY_MB = 250; 
-setInterval(async () => {
-    try {
-        const rssMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
-        if (rssMB > MAX_MEMORY_MB) {
-            console.log('⚠️ БАМПЛИМИТ! Очистка...');
-            await Stroke.deleteMany({}); 
-            io.emit('wipe_canvas');      
-            if (global.gc) global.gc(); 
-        }
-    } catch (err) {}
-}, 60 * 1000);
+// ФУНКЦИЯ ОЧИСТКИ ПАМЯТИ (БАМПЛИМИТ) БЫЛА УДАЛЕНА
 
 function getUserIdFromSocket(socket) {
     try {
@@ -96,7 +84,7 @@ io.on('connection', async (socket) => {
         } catch (err) {}
     });
 
-    // Обновление цвета квадрата (Заливка)
+    // Обновление цвета (Заливка)
     socket.on('update_stroke_color', async (data) => {
         socket.broadcast.emit('stroke_color_changed', data);
         try {
