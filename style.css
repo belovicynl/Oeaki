@@ -9,10 +9,9 @@ body { margin: 0; overflow: hidden; background-color: var(--bg-color); font-fami
 
 canvas { display: block; touch-action: none; position: absolute; top: 0; left: 0; z-index: 1; cursor: crosshair;}
 
+/* ПАНЕЛЬ НА ПК (Возвращено как было, слева сверху) */
 .panel { background: var(--panel-bg); padding: 12px; border-radius: 4px; color: var(--text-color); position: absolute; pointer-events: auto; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); z-index: 10; border: 1px solid var(--border-color); }
-
-/* ПАНЕЛЬ СПРАВА ВНИЗУ */
-.ui-left { bottom: 20px; right: 20px; top: auto; left: auto; display: flex; flex-direction: column; gap: 8px; width: 220px; max-width: calc(100vw - 40px); }
+.ui-left { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 8px; width: 220px; max-width: calc(100vw - 40px); }
 
 .row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
 .mode-toggles { display: flex; gap: 5px; width: 100%; }
@@ -22,11 +21,15 @@ button { flex: 1; padding: 6px 4px; cursor: pointer; background: #fff; color: va
 button:hover { background: #eef; }
 button:active { transform: translateY(1px); box-shadow: none; }
 
-/* ОДИНАКОВЫЙ ЦВЕТ КНОПОК РИСОВАТЬ И ДВИГАТЬ */
 .active-mode { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; filter: grayscale(0%) !important; }
 .active-tool { background: #ddd; border-color: #aaa; box-shadow: inset 1px 1px 3px rgba(0,0,0,0.1); }
 
-/* СТИЛИ ДЛЯ НОВОЙ ПАЛИТРЫ WINDOWS */
+/* СТАРАЯ ПАЛИТРА (ТОЛЬКО ДЛЯ ПК) */
+.desktop-palette input[type="color"] { width: 30px; height: 30px; padding: 0; border: 1px solid #aaa; border-radius: 2px; cursor: pointer;}
+.desktop-palette input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.desktop-palette input[type="color"]::-webkit-color-swatch { border: none; }
+
+/* НОВАЯ ПАЛИТРА (ТОЛЬКО ДЛЯ МОБИЛОК) */
 .custom-palette { display: flex; gap: 4px; flex-wrap: wrap; width: 94px; }
 .swatch { width: 20px; height: 20px; border: 1px solid #aaa; cursor: pointer; border-radius: 2px; box-sizing: border-box; }
 .swatch:hover { border-color: #333; transform: scale(1.1); }
@@ -41,9 +44,14 @@ input[type="range"] { width: 100%; margin: 0; cursor: pointer; }
 
 .mobile-menu-btn { display: none; position: absolute; top: 10px; right: 10px; z-index: 20; background: var(--panel-bg); border: 1px solid var(--border-color); width: 40px; height: 40px; border-radius: 4px; font-size: 20px; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); cursor: pointer; padding: 0; align-items: center; justify-content: center;}
 
+/* МЕДИАЗАПРОС: ПЕРЕКЛЮЧЕНИЕ ИНТЕРФЕЙСА НА ТЕЛЕФОНЕ */
 @media (max-width: 768px) {
     .mobile-menu-btn { display: flex; }
-    /* УБРАЛИ ТЕНЬ НА ТЕЛЕФОНЕ */
+    /* Панель в правый нижний угол, БЕЗ ТЕНИ */
     .ui-left { display: none; bottom: 10px; right: 10px; left: auto; top: auto; box-shadow: none !important; }
     .ui-left.show { display: flex; }
+    
+    /* Меняем палитру */
+    .desktop-palette { display: none !important; }
+    .mobile-palette { display: flex !important; }
 }

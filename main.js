@@ -46,12 +46,10 @@ function getWorldPos(screenX, screenY) {
 function updateStatusUI() {
     const statusEl = document.getElementById('statusText');
     if(statusEl) {
-        // УБРАНЫ СКОБКИ!
         statusEl.innerText = `Зум: ${Math.round(camera.zoom * 100)}% | ${Math.round(lastWorldPos.x)}, ${Math.round(lastWorldPos.y)}`;
     }
 }
 
-// === РЕНДЕР И ОТРИСОВКА (ДОБАВЛЕНЫ КРУГ И ЛИНИЯ) ===
 function drawShape(context, stroke) {
     if (stroke.points.length < 2) return;
     context.globalCompositeOperation = stroke.isEraser ? 'destination-out' : 'source-over';
@@ -120,7 +118,6 @@ function renderCore() {
     redrawPending = false;
 }
 
-// === АНТИ-ВАНДАЛИЗМ (ОБНОВЛЕНО ДЛЯ КРУГОВ И ЛИНИЙ) ===
 function calcBounds(stroke) {
     if(stroke.type === 'rect') {
         const start = stroke.points[0], end = stroke.points[stroke.points.length-1];
@@ -185,16 +182,13 @@ function rgbToHex(r, g, b) { return "#" + (1 << 24 | r << 16 | g << 8 | b).toStr
 function pickColor(x, y) {
     const px = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
     const hex = px[3] === 0 ? "#ffffff" : rgbToHex(px[0], px[1], px[2]);
-    document.getElementById('colorPicker').value = hex; myColor = hex;
-    setTool('brush');
+    updateGlobalColor(hex); // ОБНОВЛЕНО
 }
 
-// === НОВАЯ ЗАЛИВКА (ЗАКРАШИВАЕТ ТОЛЬКО СВОИ ФИГУРЫ) ===
 function handleFill(worldPos) {
     const tCanvas = document.createElement('canvas');
     const tCtx = tCanvas.getContext('2d');
     
-    // Идем с конца, чтобы кликать по самым верхним фигурам
     for (let i = myStrokes.length - 1; i >= 0; i--) {
         const s = myStrokes[i];
         if (s.points.length < 2) continue;
@@ -212,7 +206,6 @@ function handleFill(worldPos) {
             tCtx.arc(start.x, start.y, radius, 0, Math.PI * 2);
             hit = tCtx.isPointInPath(worldPos.x, worldPos.y);
         } else {
-            // Для линий и кистей проверяем попадание прямо в линию
             tCtx.lineWidth = s.size;
             tCtx.lineCap = 'round';
             tCtx.lineJoin = 'round';
@@ -225,10 +218,9 @@ function handleFill(worldPos) {
             s.color = myColor; 
             socket.emit('update_stroke_color', { strokeId: s.strokeId, color: myColor });
             requestRedraw();
-            return; // Закрасили 1 фигуру и остановились
+            return;
         }
     }
-    // Белый фон больше не трогаем!
 }
 
 function performUndo() {
@@ -239,7 +231,6 @@ function performUndo() {
     }
 }
 
-// === УПРАВЛЕНИЕ ===
 function handleStart(clientX, clientY, isTouch, e) {
     if (mode === 'pan' || (!isTouch && e.button === 1)) {
         isPanning = true; panStart = { x: clientX - camera.x, y: clientY - camera.y }; canvas.style.cursor = 'grabbing';
@@ -303,7 +294,7 @@ canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY, fa
 window.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY, e));
 window.addEventListener('mouseup', handleEnd);
 
-// === ЗУМ КОЛЕСИКОМ МЫШИ (НОВОЕ) ===
+// ЗУМ МЫШКОЙ
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const wBefore = getWorldPos(e.clientX, e.clientY);
@@ -313,14 +304,12 @@ canvas.addEventListener('wheel', (e) => {
     else camera.zoom = Math.max(camera.zoom * (1 - zoomIntensity), 0.1);
     
     const wAfter = getWorldPos(e.clientX, e.clientY);
-    
     camera.x += (wAfter.x - wBefore.x) * camera.zoom;
     camera.y += (wAfter.y - wBefore.y) * camera.zoom;
     
     updateStatusUI();
     requestRedraw();
 }, { passive: false });
-
 
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault(); 
@@ -359,8 +348,8 @@ window.addEventListener('keydown', (e) => {
     if (key === 'b') { mode = 'draw'; setTool('brush'); }
     if (key === 'e') { mode = 'draw'; setTool('eraser'); }
     if (key === 'r') { mode = 'draw'; setTool('rect'); }
-    if (key === 'c') { mode = 'draw'; setTool('circle'); } // Горячая клавиша C
-    if (key === 'l') { mode = 'draw'; setTool('line'); }   // Горячая клавиша L
+    if (key === 'c') { mode = 'draw'; setTool('circle'); }
+    if (key === 'l') { mode = 'draw'; setTool('line'); } 
     if (key === 'f') { mode = 'draw'; setTool('fill'); }
     if (key === 'i') { mode = 'draw'; setTool('picker'); }
     if (key === 'h') { document.getElementById('modePan').click(); }
@@ -385,7 +374,6 @@ window.addEventListener('keydown', (e) => {
 
 document.getElementById('mobileMenuToggle').addEventListener('click', (e) => { document.querySelector('.ui-left').classList.toggle('show'); });
 
-// ОБЩИЙ СТИЛЬ ДЛЯ КНОПОК РЕЖИМА
 document.getElementById('modeDraw').addEventListener('click', (e) => {
     mode = 'draw'; e.target.classList.add('active-mode'); document.getElementById('modePan').classList.remove('active-mode'); canvas.style.cursor = 'crosshair';
 });
@@ -413,23 +401,35 @@ for (let k in toolBtns) toolBtns[k].addEventListener('click', () => setTool(k));
 
 document.getElementById('undoBtn').addEventListener('click', performUndo);
 
-// ЛОГИКА НОВОЙ ПАЛИТРЫ
+// === СИНХРОНИЗАЦИЯ ЦВЕТА (ОБА ВАРИАНТА ПАЛИТРЫ) ===
+const colorPickerDesktop = document.getElementById('colorPickerDesktop');
+const colorPickerMobile = document.getElementById('colorPickerMobile');
+
+function updateGlobalColor(hex) {
+    myColor = hex;
+    colorPickerDesktop.value = hex;
+    colorPickerMobile.value = hex;
+    if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush');
+}
+
+// Нажатие по квадратикам в мобильной палитре
 document.querySelectorAll('.swatch').forEach(sw => {
     sw.addEventListener('click', (e) => {
-        myColor = e.target.getAttribute('data-c');
-        document.getElementById('colorPicker').value = myColor;
-        if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush');
+        updateGlobalColor(e.target.getAttribute('data-c'));
     });
 });
-document.getElementById('colorPicker').addEventListener('input', (e) => { myColor = e.target.value; if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush'); });
+
+// Ручной выбор цвета на ПК и на телефоне
+colorPickerDesktop.addEventListener('input', (e) => updateGlobalColor(e.target.value));
+colorPickerMobile.addEventListener('input', (e) => updateGlobalColor(e.target.value));
+
 document.getElementById('sizePicker').addEventListener('input', (e) => { mySize = e.target.value; });
 
-// === ФИКС СКАЧИВАНИЯ ДЛЯ FIREFOX (КРАШИ) ===
 document.getElementById('downloadBtn').addEventListener('click', () => {
     const tempCanvas = document.createElement('canvas'); tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
     const tCtx = tempCanvas.getContext('2d');
     
-    tCtx.fillStyle = '#ffffff'; // ХОЛСТ ВСЕГДА БЕЛЫЙ ПРИ СКАЧИВАНИИ
+    tCtx.fillStyle = '#ffffff'; 
     tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
     tCtx.drawImage(canvas, 0, 0);
     
@@ -442,7 +442,7 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
         link.click();
         document.body.removeChild(link);
         
-        setTimeout(() => URL.revokeObjectURL(url), 100); // ОЧИСТКА ПАМЯТИ FIREFOX
+        setTimeout(() => URL.revokeObjectURL(url), 100); 
     }, 'image/png');
 });
 

@@ -16,9 +16,15 @@
         </div>
         
         <div class="row">
-            <div class="range-wrapper" style="flex: 0 0 auto;">
+            <!-- ДЕСКТОПНАЯ ПАЛИТРА (Старая) -->
+            <div class="range-wrapper desktop-palette" style="flex: 0 0 auto;">
                 <label>Цвет</label>
-                <!-- НОВАЯ ПАЛИТРА КАК В WINDOWS -->
+                <input type="color" id="colorPickerDesktop" value="#000000">
+            </div>
+
+            <!-- МОБИЛЬНАЯ ПАЛИТРА (Новая, скрыта на ПК) -->
+            <div class="range-wrapper mobile-palette" style="flex: 0 0 auto; display: none;">
+                <label>Цвет</label>
                 <div class="custom-palette">
                     <div class="swatch" style="background: #000000" data-c="#000000"></div>
                     <div class="swatch" style="background: #ffffff" data-c="#ffffff"></div>
@@ -28,10 +34,11 @@
                     <div class="swatch" style="background: #ffff00" data-c="#ffff00"></div>
                     <div class="swatch" style="background: #800080" data-c="#800080"></div>
                     <div class="swatch-native" title="Больше цветов">
-                        <input type="color" id="colorPicker" value="#000000">
+                        <input type="color" id="colorPickerMobile" value="#000000">
                     </div>
                 </div>
             </div>
+
             <div class="range-wrapper">
                 <label>Толщина</label>
                 <input type="range" id="sizePicker" min="1" max="50" value="3">
