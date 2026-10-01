@@ -68,8 +68,4 @@ input[type="range"] { width: 100%; margin: 0; cursor: pointer; accent-color: var
     .ui-left { display: none; top: auto; bottom: 75px; right: 15px; left: auto; }
     .ui-left.show { display: flex; }
     .mobile-only-btn { display: block; /* Показываем кнопку зума на телефоне */ }
-
-    /* === БЕЗОПАСНАЯ ПЕРЕСТАНОВКА КНОПОК === */
-    #downloadBtn { order: 10; } /* Уводим кнопку скачать в самый низ */
-    #statusText { order: 11; }  /* Текст зума оставляем еще ниже */
 }
