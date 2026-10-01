@@ -49,7 +49,8 @@ function getWorldPos(screenX, screenY) {
 function updateStatusUI() {
     const statusEl = document.getElementById('statusText');
     if(statusEl) {
-        statusEl.innerText = `Зум: ${Math.round(camera.zoom * 100)}% | X: ${Math.round(lastWorldPos.x)}, Y: ${Math.round(lastWorldPos.y)}`;
+        // Убрали X и Y, добавили скобки
+        statusEl.innerText = `Зум: ${Math.round(camera.zoom * 100)}% | (${Math.round(lastWorldPos.x)}, ${Math.round(lastWorldPos.y)})`;
     }
 }
 
@@ -65,7 +66,8 @@ function drawShape(context, stroke) {
 
     if (stroke.type === 'rect') {
         const start = stroke.points[0];
-        const end = stroke.points[1];
+        // БЫЛА ОШИБКА ЗДЕСЬ: Берем последнюю точку, а не вторую!
+        const end = stroke.points[stroke.points.length - 1]; 
         context.beginPath();
         context.rect(start.x, start.y, end.x - start.x, end.y - start.y);
         context.fill();
@@ -274,8 +276,20 @@ window.addEventListener('touchmove', (e) => {
     e.preventDefault();
     if (e.touches.length === 2 && initialPinchDist) {
         const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        
+        // Находим центр между двумя пальцами
+        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        
+        const wBefore = getWorldPos(cx, cy);
         camera.zoom = Math.min(Math.max(0.1, initialZoom * (dist / initialPinchDist)), 10);
-	updateStatusUI();
+        const wAfter = getWorldPos(cx, cy);
+        
+        // Сдвигаем камеру
+        camera.x += (wAfter.x - wBefore.x) * camera.zoom;
+        camera.y += (wAfter.y - wBefore.y) * camera.zoom;
+        
+        updateStatusUI(); // Обновляем текст сразу!
         requestRedraw();
     } else {
         handleMove(e.touches[0].clientX, e.touches[0].clientY, e);
@@ -299,12 +313,22 @@ window.addEventListener('keydown', (e) => {
     if (key === 'i') { mode = 'draw'; setTool('picker'); }
     if (key === 'h') { document.getElementById('modePan').click(); }
     
-    // ЗУМ с клавиатуры (+, -, 0)
-    if (key === '=' || key === '+') { camera.zoom = Math.min(camera.zoom * 1.2, 10); requestRedraw(); }
-    if (key === '-') { camera.zoom = Math.max(camera.zoom / 1.2, 0.1); requestRedraw(); }
-    if (key === '0') { 
-        // Сброс зума, НО остаемся в тех координатах мира, где стояли
-        camera.zoom = 1; requestRedraw(); 
+        // ЗУМ с клавиатуры (+, -, 0) относительно центра экрана
+    if (key === '=' || key === '+' || key === '-' || key === '0') {
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        const wBefore = getWorldPos(cx, cy);
+        
+        if (key === '=' || key === '+') camera.zoom = Math.min(camera.zoom * 1.2, 10);
+        if (key === '-') camera.zoom = Math.max(camera.zoom / 1.2, 0.1);
+        if (key === '0') camera.zoom = 1;
+        
+        const wAfter = getWorldPos(cx, cy);
+        camera.x += (wAfter.x - wBefore.x) * camera.zoom;
+        camera.y += (wAfter.y - wBefore.y) * camera.zoom;
+        
+        updateStatusUI(); 
+        requestRedraw(); 
     }
 });
 
@@ -341,6 +365,6 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
     const link = document.createElement('a'); link.download = 'Oeaki_Art.png'; link.href = tempCanvas.toDataURL('image/png'); link.click();
 });
 
-function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; requestRedraw(); }
+function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; updateStatusUI(); requestRedraw(); }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
