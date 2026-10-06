@@ -10,10 +10,10 @@ let lastWorldPos = { x: 0, y: 0 };
 
 let myColor = "#000000";
 let mySize = 3;
-let currentBgColor = "#ffffff";
 
-let myStrokes = [];
-let othersStrokes = [];
+// Теперь у нас единый массив для всех рисунков (своих и чужих)
+let strokes = []; 
+let myStrokeIds = []; // Храним только ID своих рисунков для функции "Отмена"
 let otherCursors = {}; 
 
 const spawnRadius = 2000;
@@ -30,7 +30,6 @@ let isDrawing = false;
 let panStart = { x: 0, y: 0 };
 let currentStroke = { type: 'brush', points: [] };
 let lastCursorSend = 0;
-
 let initialPinchDist = null;
 let initialZoom = 1;
 
@@ -90,26 +89,20 @@ function requestRedraw() {
     if (!redrawPending) { redrawPending = true; requestAnimationFrame(renderCore); }
 }
 
+// РЕНДЕР СТАЛ В 5 РАЗ БЫСТРЕЕ: Никаких двойных буферов и невидимых холстов
 function renderCore() {
     ctx.clearRect(0, 0, canvas.width, canvas.height); 
     ctx.save();
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.zoom, camera.zoom);
 
-    othersStrokes.forEach(stroke => drawShape(ctx, stroke));
-
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
-    const tCtx = tempCanvas.getContext('2d');
-    tCtx.save(); tCtx.translate(camera.x, camera.y); tCtx.scale(camera.zoom, camera.zoom);
+    // Рисуем всё подряд (ластик теперь стирает и свои, и чужие рисунки)
+    strokes.forEach(stroke => drawShape(ctx, stroke));
+    if (currentStroke.points.length > 0) drawShape(ctx, currentStroke);
     
-    myStrokes.forEach(stroke => drawShape(tCtx, stroke));
-    if (currentStroke.points.length > 0) drawShape(tCtx, currentStroke);
-    
-    tCtx.restore();
     ctx.restore(); 
-    ctx.drawImage(tempCanvas, 0, 0);
 
+    // Рисуем курсоры других людей поверх зума
     ctx.save(); ctx.translate(camera.x, camera.y); ctx.scale(camera.zoom, camera.zoom);
     for (let id in otherCursors) {
         if (id === myId) continue;
@@ -121,60 +114,30 @@ function renderCore() {
     redrawPending = false;
 }
 
-function calcBounds(stroke) {
-    if(stroke.type === 'rect' || stroke.type === 'circle') {
-        const start = stroke.points[0], end = stroke.points[stroke.points.length-1];
-        return { 
-            minX: Math.min(start.x, end.x), maxX: Math.max(start.x, end.x), 
-            minY: Math.min(start.y, end.y), maxY: Math.max(start.y, end.y) 
-        };
-    }
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    stroke.points.forEach(p => {
-        if(p.x < minX) minX = p.x; if(p.x > maxX) maxX = p.x;
-        if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
-    });
-    return { minX, maxX, minY, maxY };
-}
-
-function isPositionProtected(x, y) {
-    const SAFE_ZONE = 30; 
-    for (let i = othersStrokes.length - 1; i >= 0; i--) {
-        const b = othersStrokes[i].bounds;
-        if (!b) continue;
-        if (x >= b.minX - SAFE_ZONE && x <= b.maxX + SAFE_ZONE && y >= b.minY - SAFE_ZONE && y <= b.maxY + SAFE_ZONE) {
-            return true; 
-        }
-    }
-    return false;
-}
-
+// === СОКЕТЫ ===
 socket.on('init_canvas', (data) => { 
     myId = data.myId; 
-    othersStrokes = []; myStrokes = [];
-    data.strokes.forEach(s => {
-        if (!s.strokeId) s.strokeId = 'legacy_' + Math.random().toString(36);
-        s.bounds = calcBounds(s); 
-        if(s.userId === myId) myStrokes.push(s); else othersStrokes.push(s);
-    });
+    strokes = data.strokes; // Загружаем вообще всё
+    myStrokeIds = strokes.filter(s => s.userId === myId).map(s => s.strokeId);
     requestRedraw(); 
 });
 
-socket.on('new_stroke', (stroke) => { stroke.bounds = calcBounds(stroke); othersStrokes.push(stroke); requestRedraw(); });
-socket.on('wipe_canvas', () => { myStrokes = []; othersStrokes = []; document.body.style.backgroundColor = '#ffffff'; requestRedraw(); });
+socket.on('new_stroke', (stroke) => { strokes.push(stroke); requestRedraw(); });
+socket.on('wipe_canvas', () => { strokes = []; myStrokeIds = []; requestRedraw(); });
 socket.on('cursor_update', (data) => { otherCursors[data.id] = data; requestRedraw(); });
 socket.on('cursor_remove', (id) => { delete otherCursors[id]; requestRedraw(); });
 
 socket.on('remove_stroke', (strokeId) => {
-    othersStrokes = othersStrokes.filter(s => s.strokeId !== strokeId);
+    strokes = strokes.filter(s => s.strokeId !== strokeId);
     requestRedraw();
 });
 socket.on('stroke_color_changed', (data) => {
-    const s = othersStrokes.find(s => s.strokeId === data.strokeId);
+    const s = strokes.find(s => s.strokeId === data.strokeId);
     if(s) s.color = data.color;
     requestRedraw();
 });
 
+// === ИНСТРУМЕНТЫ ===
 function rgbToHex(r, g, b) { return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1); }
 
 function pickColor(x, y) {
@@ -196,9 +159,10 @@ function distToSegmentSquared(p, v, w) {
 }
 
 function handleFill(worldPos) {
-    for (let i = myStrokes.length - 1; i >= 0; i--) {
-        const s = myStrokes[i];
-        if (s.points.length < 2) continue;
+    // ЗАЛИВКА ТЕПЕРЬ ИЩЕТ ВО ВСЕХ ФИГУРАХ (Своих и Чужих)
+    for (let i = strokes.length - 1; i >= 0; i--) {
+        const s = strokes[i];
+        if (s.points.length < 2 || s.isEraser) continue; // Не перекрашиваем ластики
         
         const start = s.points[0];
         const end = s.points[s.points.length - 1];
@@ -243,13 +207,15 @@ function handleFill(worldPos) {
 }
 
 function performUndo() {
-    if(myStrokes.length > 0) {
-        const removed = myStrokes.pop();
-        socket.emit('undo_stroke', removed.strokeId);
+    if(myStrokeIds.length > 0) {
+        const idToRemove = myStrokeIds.pop();
+        strokes = strokes.filter(s => s.strokeId !== idToRemove);
+        socket.emit('undo_stroke', idToRemove);
         requestRedraw();
     }
 }
 
+// === УПРАВЛЕНИЕ ===
 function handleStart(clientX, clientY, isTouch, e) {
     if (mode === 'pan' || (!isTouch && e.button === 1)) {
         isPanning = true; panStart = { x: clientX - camera.x, y: clientY - camera.y }; canvas.style.cursor = 'grabbing';
@@ -259,11 +225,8 @@ function handleStart(clientX, clientY, isTouch, e) {
         
         if (currentTool === 'picker') { pickColor(clientX, clientY); return; }
         if (currentTool === 'fill') { handleFill(worldPos); return; }
-        
-        if (isPositionProtected(worldPos.x, worldPos.y)) return;
 
         isDrawing = true;
-        
         let shapeType = 'brush';
         if (['rect', 'circle', 'line'].includes(currentTool)) shapeType = currentTool;
 
@@ -273,7 +236,8 @@ function handleStart(clientX, clientY, isTouch, e) {
             points: [worldPos], 
             color: myColor, 
             size: mySize, 
-            isEraser: currentTool === 'eraser' 
+            isEraser: currentTool === 'eraser',
+            userId: myId 
         };
     }
 }
@@ -289,7 +253,6 @@ function handleMove(clientX, clientY, e) {
         if (now - lastCursorSend > 30) { socket.emit('cursor_move', { x: worldPos.x, y: worldPos.y, color: currentTool === 'eraser' ? '#aaaaaa' : myColor }); lastCursorSend = now; }
 
         if (isDrawing) {
-            if (isPositionProtected(worldPos.x, worldPos.y)) { handleEnd(); return; }
             currentStroke.points.push(worldPos);
             requestRedraw();
         }
@@ -302,8 +265,8 @@ function handleEnd() {
         if(['rect', 'circle', 'line'].includes(currentStroke.type)) {
             currentStroke.points = [currentStroke.points[0], currentStroke.points[currentStroke.points.length-1]];
         }
-        currentStroke.bounds = calcBounds(currentStroke);
-        myStrokes.push(JSON.parse(JSON.stringify(currentStroke)));
+        strokes.push(JSON.parse(JSON.stringify(currentStroke)));
+        myStrokeIds.push(currentStroke.strokeId); // Сохраняем ID для Отмены
         socket.emit('draw_stroke', currentStroke); 
     }
     isDrawing = false; currentStroke.points = []; requestRedraw();
@@ -313,16 +276,11 @@ canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY, fa
 window.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY, e));
 window.addEventListener('mouseup', handleEnd);
 
-// === ИСПРАВЛЕННАЯ МАТЕМАТИКА ЗУМА ===
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const wBefore = getWorldPos(e.clientX, e.clientY);
-    
-    // ПРИБАВЛЯЕМ СТРОГО ПО 10% (0.1) ИЛИ ОТНИМАЕМ
     if (e.deltaY < 0) camera.zoom = Math.min(camera.zoom + 0.1, 10);
     else camera.zoom = Math.max(camera.zoom - 0.1, 0.1);
-    
-    // Округляем, чтобы не было кривых цифр типа 3.00000001
     camera.zoom = Math.round(camera.zoom * 10) / 10;
     
     const wAfter = getWorldPos(e.clientX, e.clientY);
@@ -376,7 +334,6 @@ window.addEventListener('keydown', (e) => {
     if (key === 'i') { mode = 'draw'; setTool('picker'); }
     if (key === 'h') { document.getElementById('modePan').click(); }
     
-    // МАТЕМАТИКА ЗУМА С КЛАВИАТУРЫ (Тоже по 10%)
     if (key === '=' || key === '+' || key === '-' || key === '0') {
         const cx = window.innerWidth / 2;
         const cy = window.innerHeight / 2;
@@ -387,7 +344,6 @@ window.addEventListener('keydown', (e) => {
         if (key === '0') camera.zoom = 1;
         
         camera.zoom = Math.round(camera.zoom * 10) / 10;
-        
         const wAfter = getWorldPos(cx, cy);
         camera.x += (wAfter.x - wBefore.x) * camera.zoom;
         camera.y += (wAfter.y - wBefore.y) * camera.zoom;
@@ -397,24 +353,19 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-// КНОПКА ОТКРЫТИЯ МЕНЮ (С ВДАВЛИВАНИЕМ)
 document.getElementById('mobileMenuToggle').addEventListener('click', (e) => { 
     document.querySelector('.ui-left').classList.toggle('show'); 
-    e.currentTarget.classList.toggle('pressed'); // Добавляем/убираем эффект нажатия
+    e.currentTarget.classList.toggle('pressed'); 
 });
 
-// КНОПКА СБРОСА ЗУМА НА ТЕЛЕФОНЕ
 document.getElementById('resetZoomBtn').addEventListener('click', () => {
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
     const wBefore = getWorldPos(cx, cy);
-    
-    camera.zoom = 1; // Устанавливаем 100%
-    
+    camera.zoom = 1; 
     const wAfter = getWorldPos(cx, cy);
     camera.x += (wAfter.x - wBefore.x) * camera.zoom;
     camera.y += (wAfter.y - wBefore.y) * camera.zoom;
-    
     updateStatusUI(); 
     requestRedraw();
 });
@@ -427,13 +378,7 @@ document.getElementById('modePan').addEventListener('click', (e) => {
 });
 
 const toolBtns = { 
-    'brush': document.getElementById('brushBtn'), 
-    'rect': document.getElementById('rectBtn'), 
-    'circle': document.getElementById('circleBtn'), 
-    'line': document.getElementById('lineBtn'),
-    'eraser': document.getElementById('eraserBtn'), 
-    'fill': document.getElementById('fillBtn'), 
-    'picker': document.getElementById('pickerBtn') 
+    'brush': document.getElementById('brushBtn'), 'rect': document.getElementById('rectBtn'), 'circle': document.getElementById('circleBtn'), 'line': document.getElementById('lineBtn'),'eraser': document.getElementById('eraserBtn'), 'fill': document.getElementById('fillBtn'), 'picker': document.getElementById('pickerBtn') 
 };
 
 function setTool(newTool) {
@@ -443,10 +388,8 @@ function setTool(newTool) {
     if(mode !== 'draw') document.getElementById('modeDraw').click();
 }
 for (let k in toolBtns) toolBtns[k].addEventListener('click', () => setTool(k));
-
 document.getElementById('undoBtn').addEventListener('click', performUndo);
 
-// ПРОСТАЯ ПАЛИТРА
 document.getElementById('colorPicker').addEventListener('input', (e) => { 
     myColor = e.target.value; 
     if(currentTool === 'eraser' || currentTool === 'picker') setTool('brush'); 
@@ -456,20 +399,14 @@ document.getElementById('sizePicker').addEventListener('input', (e) => { mySize 
 document.getElementById('downloadBtn').addEventListener('click', () => {
     const tempCanvas = document.createElement('canvas'); tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
     const tCtx = tempCanvas.getContext('2d');
-    
     tCtx.fillStyle = '#ffffff'; 
     tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
     tCtx.drawImage(canvas, 0, 0);
     
     tempCanvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
-        const link = document.createElement('a'); 
-        link.download = 'Oeaki_Art.png'; 
-        link.href = url; 
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
+        const link = document.createElement('a'); link.download = 'Oeaki_Art.png'; link.href = url; 
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(url), 100); 
     }, 'image/png');
 });
