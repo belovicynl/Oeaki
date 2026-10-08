@@ -2,8 +2,8 @@ const socket = io();
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-const WORLD_WIDTH = 4000;
-const WORLD_HEIGHT = 4000;
+const WORLD_WIDTH = 40000;
+const WORLD_HEIGHT = 40000;
 
 const worldCanvas = document.createElement('canvas');
 worldCanvas.width = WORLD_WIDTH;
