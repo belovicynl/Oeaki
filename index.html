@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Кнопка вызова меню на телефоне -->
     <button id="mobileMenuToggle" class="mobile-menu-btn">🎨&#xFE0E;</button>
 
     <div class="panel ui-left">
@@ -17,13 +16,11 @@
         </div>
         
         <div class="row">
-            <!-- Старая палитра (Один квадратик) -->
             <div class="range-wrapper" style="flex: 0 0 auto;">
                 <label>Цвет</label>
                 <input type="color" id="colorPicker" value="#000000">
             </div>
 
-            <!-- Ползунок толщины -->
             <div class="range-wrapper">
                 <label>Толщина</label>
                 <input type="range" id="sizePicker" min="1" max="50" value="3">
@@ -41,12 +38,17 @@
         </div>
 
         <button id="undoBtn" style="background: #e0e0e0; color: #333; margin-top: 5px;" title="Отмена (Ctrl+Z)">↩&#xFE0E; ОТМЕНА</button>
-        <button id="downloadBtn" style="background: #e0e0e0; color: #333; margin-top: 5px;">💾&#xFE0E; СКАЧАТЬ</button>
         
-        <!-- НОВАЯ КНОПКА СБРОСА ЗУМА (Только для телефона) -->
+        <!-- Кнопка сброса зума (Скрыта на ПК, появляется на телефоне) -->
         <button id="resetZoomBtn" class="mobile-only-btn" style="background: #e0e0e0; color: #333; margin-top: 5px;">🔍 ЗУМ 100%</button>
         
-        <div id="statusText" class="hint-text">Зум: 100% | X: 0, Y: 0</div>
+        <!-- Две кнопки скачивания в один ряд (Стоят ПОД зумом) -->
+        <div style="display: flex; gap: 4px; margin-top: 5px; width: 100%;">
+            <button id="dlScreenBtn" style="background: #e0e0e0; color: #333;" title="Скачать то, что на экране">💾 ЭКРАН</button>
+            <button id="dlWorldBtn" style="background: #e0e0e0; color: #333;" title="Скачать весь холст 4000x4000">💾 ВСЁ</button>
+        </div>
+        
+        <div id="statusText" class="hint-text">Зум: 100% | 0, 0</div>
     </div>
 
     <canvas id="board"></canvas>

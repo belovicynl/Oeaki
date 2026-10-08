@@ -3,13 +3,12 @@
     --panel-bg: rgba(240, 240, 240, 0.95); 
     --text-color: #333;
     --border-color: #ccc;
-    --accent: #0078D7; /* Синий как в винде */
+    --accent: #0078D7;
 }
 body { margin: 0; overflow: hidden; background-color: var(--bg-color); font-family: 'Segoe UI', sans-serif; user-select: none; -webkit-user-select: none; }
 
 canvas { display: block; touch-action: none; position: absolute; top: 0; left: 0; z-index: 1; cursor: crosshair;}
 
-/* ПАНЕЛЬ */
 .panel { background: var(--panel-bg); padding: 12px; border-radius: 4px; color: var(--text-color); position: absolute; pointer-events: auto; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); z-index: 10; border: 1px solid var(--border-color); }
 .ui-left { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 8px; width: 220px; max-width: calc(100vw - 40px); }
 
@@ -17,7 +16,6 @@ canvas { display: block; touch-action: none; position: absolute; top: 0; left: 0
 .mode-toggles { display: flex; gap: 5px; width: 100%; }
 .tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: 100%; }
 
-/* КНОПКИ */
 button { 
     flex: 1; padding: 6px 4px; cursor: pointer; background: #fff; 
     color: var(--text-color); border: 1px solid var(--border-color); 
@@ -31,7 +29,6 @@ button:active { background: #e5e5e5; transform: scale(0.97); }
 .active-mode { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; }
 .active-tool { background: #e0f0ff; border-color: var(--accent); color: #000; box-shadow: none; }
 
-/* СТАРАЯ ПАЛИТРА (1 квадрат) */
 input[type="color"] { width: 30px; height: 30px; padding: 0; border: 1px solid #aaa; border-radius: 4px; cursor: pointer;}
 input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 input[type="color"]::-webkit-color-swatch { border: none; border-radius: 3px; }
@@ -39,27 +36,23 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 3px; }
 .range-wrapper { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .range-wrapper label { font-size: 10px; color: #666; font-weight: bold; margin-bottom: 2px; }
 
-/* СИНИЙ ПОЛЗУНОК */
 input[type="range"] { width: 100%; margin: 0; cursor: pointer; accent-color: var(--accent); }
 
 .hint-text { font-size: 10px; color: #888; text-align: center; margin-top: 5px; font-weight: bold;}
 
-/* КНОПКА ЗУМА СКРЫТА НА ПК */
 .mobile-only-btn { display: none; }
 
-/* ВЫПУКЛАЯ КНОПКА МЕНЮ */
 .mobile-menu-btn { 
     display: none; position: absolute; z-index: 20; background: var(--panel-bg); 
     border: 1px solid #aaa; width: 46px; height: 46px; border-radius: 50%; 
     font-size: 20px; cursor: pointer; padding: 0; align-items: center; justify-content: center; 
     -webkit-tap-highlight-color: transparent;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2); /* 3D тень снаружи */
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);
     transition: all 0.15s ease;
 }
-/* НАЖАТОЕ СОСТОЯНИЕ КНОПКИ МЕНЮ */
 .mobile-menu-btn.pressed {
-    box-shadow: inset 0 4px 6px rgba(0,0,0,0.4); /* Тень внутри (вдавленность) */
-    transform: translateY(2px); /* Смещение вниз */
+    box-shadow: inset 0 4px 6px rgba(0,0,0,0.4);
+    transform: translateY(2px);
     background: #e0e0e0;
 }
 
@@ -67,5 +60,5 @@ input[type="range"] { width: 100%; margin: 0; cursor: pointer; accent-color: var
     .mobile-menu-btn { display: flex; top: auto; bottom: 15px; right: 15px; }
     .ui-left { display: none; top: auto; bottom: 75px; right: 15px; left: auto; }
     .ui-left.show { display: flex; }
-    .mobile-only-btn { display: block; /* Показываем кнопку зума на телефоне */ }
+    .mobile-only-btn { display: block; }
 }

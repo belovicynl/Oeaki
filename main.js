@@ -2,6 +2,16 @@ const socket = io();
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
+const WORLD_WIDTH = 4000;
+const WORLD_HEIGHT = 4000;
+
+const worldCanvas = document.createElement('canvas');
+worldCanvas.width = WORLD_WIDTH;
+worldCanvas.height = WORLD_HEIGHT;
+const wCtx = worldCanvas.getContext('2d', { willReadFrequently: true });
+wCtx.fillStyle = '#ffffff';
+wCtx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
 let redrawPending = false; 
 let myId = null;
 let mode = 'draw'; 
@@ -11,17 +21,13 @@ let lastWorldPos = { x: 0, y: 0 };
 let myColor = "#000000";
 let mySize = 3;
 
-// Теперь у нас единый массив для всех рисунков (своих и чужих)
 let strokes = []; 
-let myStrokeIds = []; // Храним только ID своих рисунков для функции "Отмена"
+let myStrokeIds = []; 
 let otherCursors = {}; 
 
-const spawnRadius = 2000;
-const randomAngle = Math.random() * Math.PI * 2;
-const randomDist = Math.random() * spawnRadius;
 let camera = { 
-    x: (window.innerWidth / 2) - (Math.cos(randomAngle) * randomDist), 
-    y: (window.innerHeight / 2) - (Math.sin(randomAngle) * randomDist), 
+    x: (window.innerWidth / 2) - (WORLD_WIDTH / 2), 
+    y: (window.innerHeight / 2) - (WORLD_HEIGHT / 2), 
     zoom: 1 
 };
 
@@ -85,24 +91,38 @@ function drawShape(context, stroke) {
     context.globalCompositeOperation = 'source-over';
 }
 
+function redrawWorld() {
+    wCtx.globalCompositeOperation = 'source-over';
+    wCtx.fillStyle = '#ffffff';
+    wCtx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    strokes.forEach(s => drawShape(wCtx, s));
+    requestRedraw();
+}
+
 function requestRedraw() {
     if (!redrawPending) { redrawPending = true; requestAnimationFrame(renderCore); }
 }
 
-// РЕНДЕР СТАЛ В 5 РАЗ БЫСТРЕЕ: Никаких двойных буферов и невидимых холстов
 function renderCore() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height); 
+    ctx.fillStyle = '#cccccc'; 
+    ctx.fillRect(0, 0, canvas.width, canvas.height); 
+    
     ctx.save();
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.zoom, camera.zoom);
 
-    // Рисуем всё подряд (ластик теперь стирает и свои, и чужие рисунки)
-    strokes.forEach(stroke => drawShape(ctx, stroke));
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    ctx.shadowColor = 'transparent';
+
+    ctx.drawImage(worldCanvas, 0, 0);
+
     if (currentStroke.points.length > 0) drawShape(ctx, currentStroke);
     
     ctx.restore(); 
 
-    // Рисуем курсоры других людей поверх зума
     ctx.save(); ctx.translate(camera.x, camera.y); ctx.scale(camera.zoom, camera.zoom);
     for (let id in otherCursors) {
         if (id === myId) continue;
@@ -114,38 +134,43 @@ function renderCore() {
     redrawPending = false;
 }
 
-// === СОКЕТЫ ===
 socket.on('init_canvas', (data) => { 
     myId = data.myId; 
-    strokes = data.strokes; // Загружаем вообще всё
+    strokes = data.strokes; 
     myStrokeIds = strokes.filter(s => s.userId === myId).map(s => s.strokeId);
-    requestRedraw(); 
+    redrawWorld(); 
 });
 
-socket.on('new_stroke', (stroke) => { strokes.push(stroke); requestRedraw(); });
-socket.on('wipe_canvas', () => { strokes = []; myStrokeIds = []; requestRedraw(); });
+socket.on('new_stroke', (stroke) => { 
+    strokes.push(stroke); 
+    drawShape(wCtx, stroke); 
+    requestRedraw(); 
+});
+socket.on('wipe_canvas', () => { strokes = []; myStrokeIds = []; redrawWorld(); });
 socket.on('cursor_update', (data) => { otherCursors[data.id] = data; requestRedraw(); });
 socket.on('cursor_remove', (id) => { delete otherCursors[id]; requestRedraw(); });
 
 socket.on('remove_stroke', (strokeId) => {
     strokes = strokes.filter(s => s.strokeId !== strokeId);
-    requestRedraw();
+    redrawWorld(); 
 });
 socket.on('stroke_color_changed', (data) => {
     const s = strokes.find(s => s.strokeId === data.strokeId);
     if(s) s.color = data.color;
-    requestRedraw();
+    redrawWorld(); 
 });
 
-// === ИНСТРУМЕНТЫ ===
 function rgbToHex(r, g, b) { return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1); }
 
 function pickColor(x, y) {
-    const px = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
-    const hex = px[3] === 0 ? "#ffffff" : rgbToHex(px[0], px[1], px[2]);
-    document.getElementById('colorPicker').value = hex; 
-    myColor = hex;
-    setTool('brush');
+    const wPos = getWorldPos(x, y);
+    if (wPos.x >= 0 && wPos.x <= WORLD_WIDTH && wPos.y >= 0 && wPos.y <= WORLD_HEIGHT) {
+        const px = wCtx.getImageData(Math.round(wPos.x), Math.round(wPos.y), 1, 1).data;
+        const hex = rgbToHex(px[0], px[1], px[2]);
+        document.getElementById('colorPicker').value = hex; 
+        myColor = hex;
+        setTool('brush');
+    }
 }
 
 function sqr(x) { return x * x; }
@@ -159,10 +184,9 @@ function distToSegmentSquared(p, v, w) {
 }
 
 function handleFill(worldPos) {
-    // ЗАЛИВКА ТЕПЕРЬ ИЩЕТ ВО ВСЕХ ФИГУРАХ (Своих и Чужих)
     for (let i = strokes.length - 1; i >= 0; i--) {
         const s = strokes[i];
-        if (s.points.length < 2 || s.isEraser) continue; // Не перекрашиваем ластики
+        if (s.points.length < 2 || s.isEraser) continue;
         
         const start = s.points[0];
         const end = s.points[s.points.length - 1];
@@ -180,7 +204,6 @@ function handleFill(worldPos) {
             const cy = (start.y + end.y) / 2;
             const rx = Math.abs(end.x - start.x) / 2;
             const ry = Math.abs(end.y - start.y) / 2;
-            
             if (rx > 0 && ry > 0) {
                 const dx = worldPos.x - cx;
                 const dy = worldPos.y - cy;
@@ -200,7 +223,7 @@ function handleFill(worldPos) {
         if (hit) {
             s.color = myColor; 
             socket.emit('update_stroke_color', { strokeId: s.strokeId, color: myColor });
-            requestRedraw();
+            redrawWorld();
             return; 
         }
     }
@@ -211,11 +234,10 @@ function performUndo() {
         const idToRemove = myStrokeIds.pop();
         strokes = strokes.filter(s => s.strokeId !== idToRemove);
         socket.emit('undo_stroke', idToRemove);
-        requestRedraw();
+        redrawWorld();
     }
 }
 
-// === УПРАВЛЕНИЕ ===
 function handleStart(clientX, clientY, isTouch, e) {
     if (mode === 'pan' || (!isTouch && e.button === 1)) {
         isPanning = true; panStart = { x: clientX - camera.x, y: clientY - camera.y }; canvas.style.cursor = 'grabbing';
@@ -266,7 +288,8 @@ function handleEnd() {
             currentStroke.points = [currentStroke.points[0], currentStroke.points[currentStroke.points.length-1]];
         }
         strokes.push(JSON.parse(JSON.stringify(currentStroke)));
-        myStrokeIds.push(currentStroke.strokeId); // Сохраняем ID для Отмены
+        myStrokeIds.push(currentStroke.strokeId);
+        drawShape(wCtx, currentStroke); 
         socket.emit('draw_stroke', currentStroke); 
     }
     isDrawing = false; currentStroke.points = []; requestRedraw();
@@ -359,13 +382,9 @@ document.getElementById('mobileMenuToggle').addEventListener('click', (e) => {
 });
 
 document.getElementById('resetZoomBtn').addEventListener('click', () => {
-    const cx = window.innerWidth / 2;
-    const cy = window.innerHeight / 2;
-    const wBefore = getWorldPos(cx, cy);
     camera.zoom = 1; 
-    const wAfter = getWorldPos(cx, cy);
-    camera.x += (wAfter.x - wBefore.x) * camera.zoom;
-    camera.y += (wAfter.y - wBefore.y) * camera.zoom;
+    camera.x = (window.innerWidth / 2) - (WORLD_WIDTH / 2);
+    camera.y = (window.innerHeight / 2) - (WORLD_HEIGHT / 2);
     updateStatusUI(); 
     requestRedraw();
 });
@@ -396,16 +415,34 @@ document.getElementById('colorPicker').addEventListener('input', (e) => {
 });
 document.getElementById('sizePicker').addEventListener('input', (e) => { mySize = e.target.value; });
 
-document.getElementById('downloadBtn').addEventListener('click', () => {
-    const tempCanvas = document.createElement('canvas'); tempCanvas.width = canvas.width; tempCanvas.height = canvas.height;
+// === КНОПКА: СКАЧАТЬ ЭКРАН (Только то, что видишь) ===
+document.getElementById('dlScreenBtn').addEventListener('click', () => {
+    const tempCanvas = document.createElement('canvas'); 
+    tempCanvas.width = canvas.width; 
+    tempCanvas.height = canvas.height;
     const tCtx = tempCanvas.getContext('2d');
+    
     tCtx.fillStyle = '#ffffff'; 
     tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
     tCtx.drawImage(canvas, 0, 0);
     
     tempCanvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
-        const link = document.createElement('a'); link.download = 'Oeaki_Art.png'; link.href = url; 
+        const link = document.createElement('a'); 
+        link.download = 'Oeaki_Screen.png'; 
+        link.href = url; 
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 100); 
+    }, 'image/png');
+});
+
+// === КНОПКА: СКАЧАТЬ ВСЁ (Весь мир 4000x4000) ===
+document.getElementById('dlWorldBtn').addEventListener('click', () => {
+    worldCanvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a'); 
+        link.download = 'Oeaki_World.png'; 
+        link.href = url; 
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(url), 100); 
     }, 'image/png');
