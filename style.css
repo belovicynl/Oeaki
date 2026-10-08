@@ -9,8 +9,8 @@ body { margin: 0; overflow: hidden; background-color: var(--bg-color); font-fami
 
 canvas { display: block; touch-action: none; position: absolute; top: 0; left: 0; z-index: 1; cursor: crosshair;}
 
-.panel { background: var(--panel-bg); padding: 12px; border-radius: 4px; color: var(--text-color); position: absolute; pointer-events: auto; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); z-index: 10; border: 1px solid var(--border-color); }
-.ui-left { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 8px; width: 220px; max-width: calc(100vw - 40px); }
+.panel { background: var(--panel-bg); padding: 12px; border-radius: 4px; color: var(--text-color); position: absolute; pointer-events: auto; box-shadow: 2px 2px 10px rgba(0,0,0,0.1); z-index: 10; border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 8px; }
+.ui-left { top: 10px; left: 10px; width: 220px; max-width: calc(100vw - 40px); }
 
 .row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
 .mode-toggles { display: flex; gap: 5px; width: 100%; }
@@ -61,4 +61,7 @@ input[type="range"] { width: 100%; margin: 0; cursor: pointer; accent-color: var
     .ui-left { display: none; top: auto; bottom: 75px; right: 15px; left: auto; }
     .ui-left.show { display: flex; }
     .mobile-only-btn { display: block; }
+    
+    #downloadBtn { order: 10; }
+    #statusText { order: 11; }
 }

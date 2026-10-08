@@ -15,6 +15,17 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// === СЕКРЕТНАЯ ОЧИСТКА БАЗЫ (Введи это в браузере, чтобы всё стереть) ===
+app.get('/wipe-db-my-secret-password-123', async (req, res) => {
+    try {
+        await Stroke.deleteMany({});
+        io.emit('wipe_canvas');      
+        res.send('✅ База данных и холст успешно очищены!');
+    } catch (err) {
+        res.status(500).send('❌ Ошибка при очистке: ' + err.message);
+    }
+});
+
 // === ПОДКЛЮЧЕНИЕ К БД ===
 const mongoUri = process.env.MONGO_URI;
 if (mongoUri) {
@@ -34,8 +45,6 @@ const StrokeSchema = new mongoose.Schema({
     userId: String
 });
 const Stroke = mongoose.model('Stroke', StrokeSchema);
-
-// ФУНКЦИЯ ОЧИСТКИ ПАМЯТИ (БАМПЛИМИТ) БЫЛА УДАЛЕНА
 
 function getUserIdFromSocket(socket) {
     try {
@@ -57,7 +66,6 @@ io.on('connection', async (socket) => {
         socket.emit('init_canvas', { strokes: allStrokes, myId: uniqueUserId });
     } catch (err) {}
 
-    // Рисование
     socket.on('draw_stroke', async (stroke) => {
         stroke.userId = uniqueUserId;
         socket.broadcast.emit('new_stroke', stroke);
@@ -76,7 +84,6 @@ io.on('connection', async (socket) => {
         } catch (err) {}
     });
 
-    // Отмена (Undo)
     socket.on('undo_stroke', async (strokeId) => {
         socket.broadcast.emit('remove_stroke', strokeId);
         try {
@@ -84,7 +91,6 @@ io.on('connection', async (socket) => {
         } catch (err) {}
     });
 
-    // Обновление цвета (Заливка)
     socket.on('update_stroke_color', async (data) => {
         socket.broadcast.emit('stroke_color_changed', data);
         try {

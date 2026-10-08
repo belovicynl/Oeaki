@@ -15,7 +15,6 @@ let strokes = [];
 let myStrokeIds = []; 
 let otherCursors = {}; 
 
-// Спавн камеры: центр мира (0, 0) теперь ровно по центру твоего экрана
 let camera = { 
     x: window.innerWidth / 2, 
     y: window.innerHeight / 2, 
@@ -46,7 +45,6 @@ function updateStatusUI() {
     }
 }
 
-// Расчет Габаритов (Нужен для оптимизации - Отсечения невидимого)
 function calcBounds(stroke) {
     if(stroke.type === 'rect' || stroke.type === 'circle') {
         const start = stroke.points[0], end = stroke.points[stroke.points.length-1];
@@ -103,13 +101,10 @@ function requestRedraw() {
     if (!redrawPending) { redrawPending = true; requestAnimationFrame(renderCore); }
 }
 
-// === ОПТИМИЗИРОВАННЫЙ РЕНДЕР (Без лагов, бесконечный мир) ===
 function renderCore() {
-    // 1. Очищаем экран
     ctx.fillStyle = '#ffffff'; 
     ctx.fillRect(0, 0, canvas.width, canvas.height); 
     
-    // 2. Высчитываем границы экрана в мировых координатах
     const viewMinX = -camera.x / camera.zoom;
     const viewMinY = -camera.y / camera.zoom;
     const viewMaxX = (canvas.width - camera.x) / camera.zoom;
@@ -119,22 +114,18 @@ function renderCore() {
     ctx.translate(camera.x, camera.y);
     ctx.scale(camera.zoom, camera.zoom);
 
-    // 3. РИСУЕМ ТОЛЬКО ТО, ЧТО ПОПАДАЕТ В КАМЕРУ (Гениально избавляет от лагов!)
     strokes.forEach(stroke => {
         if (!stroke.bounds) return;
         const b = stroke.bounds;
-        // Проверка пересечения: виден ли рисунок на экране?
         if (b.maxX >= viewMinX && b.minX <= viewMaxX && b.maxY >= viewMinY && b.minY <= viewMaxY) {
             drawShape(ctx, stroke);
         }
     });
 
-    // Рисуем текущую линию
     if (currentStroke.points.length > 0) drawShape(ctx, currentStroke);
     
     ctx.restore(); 
 
-    // Рисуем курсоры
     ctx.save(); ctx.translate(camera.x, camera.y); ctx.scale(camera.zoom, camera.zoom);
     for (let id in otherCursors) {
         if (id === myId) continue;
@@ -146,11 +137,9 @@ function renderCore() {
     redrawPending = false;
 }
 
-// === СОКЕТЫ ===
 socket.on('init_canvas', (data) => { 
     myId = data.myId; 
     strokes = data.strokes; 
-    // Гарантируем, что у всех старых линий из БД есть границы для оптимизации
     strokes.forEach(s => { if(!s.bounds) s.bounds = calcBounds(s); });
     myStrokeIds = strokes.filter(s => s.userId === myId).map(s => s.strokeId);
     requestRedraw(); 
@@ -178,7 +167,6 @@ socket.on('stroke_color_changed', (data) => {
 function rgbToHex(r, g, b) { return "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1); }
 
 function pickColor(x, y) {
-    // Пипетка берет цвет прямо с экрана браузера
     const px = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
     const hex = px[3] === 0 ? "#ffffff" : rgbToHex(px[0], px[1], px[2]);
     document.getElementById('colorPicker').value = hex; 
@@ -300,7 +288,7 @@ function handleEnd() {
         if(['rect', 'circle', 'line'].includes(currentStroke.type)) {
             currentStroke.points = [currentStroke.points[0], currentStroke.points[currentStroke.points.length-1]];
         }
-        currentStroke.bounds = calcBounds(currentStroke); // Обязательно считаем границы!
+        currentStroke.bounds = calcBounds(currentStroke);
         strokes.push(JSON.parse(JSON.stringify(currentStroke)));
         myStrokeIds.push(currentStroke.strokeId);
         socket.emit('draw_stroke', currentStroke); 
@@ -395,9 +383,16 @@ document.getElementById('mobileMenuToggle').addEventListener('click', (e) => {
 });
 
 document.getElementById('resetZoomBtn').addEventListener('click', () => {
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const wBefore = getWorldPos(cx, cy);
+    
     camera.zoom = 1; 
-    camera.x = window.innerWidth / 2;
-    camera.y = window.innerHeight / 2;
+    
+    const wAfter = getWorldPos(cx, cy);
+    camera.x += (wAfter.x - wBefore.x) * camera.zoom;
+    camera.y += (wAfter.y - wBefore.y) * camera.zoom;
+    
     updateStatusUI(); 
     requestRedraw();
 });
@@ -428,9 +423,7 @@ document.getElementById('colorPicker').addEventListener('input', (e) => {
 });
 document.getElementById('sizePicker').addEventListener('input', (e) => { mySize = e.target.value; });
 
-
-// === СКАЧИВАНИЕ ЭКРАНА (Только видимая часть) ===
-document.getElementById('dlScreenBtn').addEventListener('click', () => {
+document.getElementById('downloadBtn').addEventListener('click', () => {
     const tempCanvas = document.createElement('canvas'); 
     tempCanvas.width = canvas.width; 
     tempCanvas.height = canvas.height;
@@ -438,72 +431,16 @@ document.getElementById('dlScreenBtn').addEventListener('click', () => {
     
     tCtx.fillStyle = '#ffffff'; 
     tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-    tCtx.drawImage(canvas, 0, 0); // Рисуем текущий вид
+    tCtx.drawImage(canvas, 0, 0);
     
     tempCanvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a'); 
-        link.download = 'Oeaki_Screen.png'; 
+        link.download = 'Oeaki_Art.png'; 
         link.href = url; 
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(url), 100); 
-    }, 'image/png');
-});
-
-// === СКАЧИВАНИЕ ВСЕГО МИРА (Умная обрезка, чтобы браузер не умер) ===
-document.getElementById('dlWorldBtn').addEventListener('click', () => {
-    if (strokes.length === 0) return alert('Холст пуст!');
-
-    // Ищем фактические границы всех рисунков
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    strokes.forEach(s => {
-        if (!s.bounds) return;
-        minX = Math.min(minX, s.bounds.minX);
-        minY = Math.min(minY, s.bounds.minY);
-        maxX = Math.max(maxX, s.bounds.maxX);
-        maxY = Math.max(maxY, s.bounds.maxY);
-    });
-
-    let width = maxX - minX;
-    let height = maxY - minY;
-    
-    // Если нарисовали слишком огромный мир, мы его сожмем, чтобы не крашнуть ПК
-    const MAX_SIZE = 8192; 
-    let scale = 1;
-    if (width > MAX_SIZE || height > MAX_SIZE) {
-        scale = Math.min(MAX_SIZE / width, MAX_SIZE / height);
-        width *= scale;
-        height *= scale;
-    }
-
-    // Добавляем отступы
-    const padding = 50 * scale;
-    width += padding * 2;
-    height += padding * 2;
-
-    const exportCanvas = document.createElement('canvas');
-    exportCanvas.width = width;
-    exportCanvas.height = height;
-    const eCtx = exportCanvas.getContext('2d');
-    
-    eCtx.fillStyle = '#ffffff';
-    eCtx.fillRect(0, 0, width, height);
-    
-    eCtx.save();
-    eCtx.translate(padding, padding);
-    eCtx.scale(scale, scale);
-    eCtx.translate(-minX, -minY); // Сдвигаем мир так, чтобы рисунки были с левого верхнего угла
-    
-    strokes.forEach(s => drawShape(eCtx, s));
-    
-    eCtx.restore();
-
-    exportCanvas.toBlob((blob) => {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a'); 
-        link.download = 'Oeaki_World.png'; 
-        link.href = url; 
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        document.body.appendChild(link); 
+        link.click(); 
+        document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(url), 100); 
     }, 'image/png');
 });
