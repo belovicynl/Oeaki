@@ -431,7 +431,7 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
     
     tCtx.fillStyle = '#ffffff'; 
     tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-    tCtx.drawImage(canvas, 0, 0);
+    tCtx.drawImage(canvas, 0, 0); 
     
     tempCanvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);

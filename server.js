@@ -15,26 +15,23 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// === СЕКРЕТНАЯ ОЧИСТКА БАЗЫ (Введи это в браузере, чтобы всё стереть) ===
 app.get('/wipe-db-my-secret-password-123', async (req, res) => {
     try {
         await Stroke.deleteMany({});
         io.emit('wipe_canvas');      
-        res.send('✅ База данных и холст успешно очищены!');
+        res.send('ОК');
     } catch (err) {
-        res.status(500).send('❌ Ошибка при очистке: ' + err.message);
+        res.status(500).send('ERR: ' + err.message);
     }
 });
 
-// === ПОДКЛЮЧЕНИЕ К БД ===
 const mongoUri = process.env.MONGO_URI;
 if (mongoUri) {
     mongoose.connect(mongoUri)
-        .then(() => console.log('✅ Успешно подключено к MongoDB!'))
-        .catch(err => console.error('❌ Ошибка подключения к БД:', err));
+        .then(() => console.log('MongoDB connected'))
+        .catch(err => console.error('DB error:', err));
 }
 
-// === СХЕМА БД ===
 const StrokeSchema = new mongoose.Schema({
     strokeId: { type: String },
     type: { type: String, default: 'brush' }, 
@@ -57,7 +54,6 @@ function getUserIdFromSocket(socket) {
     }
 }
 
-// === СОКЕТЫ ===
 io.on('connection', async (socket) => {
     const uniqueUserId = getUserIdFromSocket(socket);
     
@@ -109,5 +105,5 @@ io.on('connection', async (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Сервер запущен на порту ${PORT}`);
+    console.log(`Port: ${PORT}`);
 });
