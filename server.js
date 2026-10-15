@@ -113,7 +113,7 @@ const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
 
 const THREADS_TO_WATCH = [
-    { board: 'rf', id: '5757010', lastCount: 0 }
+    { board: 'rf', id: '5502595', lastCount: 0 }
 ];
 
 const transporter = nodemailer.createTransport({
