@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer'); // Подключаем почтальона
 
 const app = express();
 const server = http.createServer(app);
@@ -80,6 +81,7 @@ io.on('connection', async (socket) => {
         } catch (err) {}
     });
 
+    // ... (тут остались все твои сокеты для рисовалки без изменений)
     socket.on('undo_stroke', async (strokeId) => {
         socket.broadcast.emit('remove_stroke', strokeId);
         try {
@@ -109,50 +111,53 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 // =========================================================================
-// --- ФОНОВЫЙ ПРОЦЕСС (Проверка каждые 5 минут с ПОДРОБНЫМИ ЛОГАМИ) ---
+// --- ФОНОВЫЙ ПРОЦЕСС (Почта, интервал 5 минут, подробные логи) ---
 // =========================================================================
 
-const SIMPLEPUSH_KEY = process.env.SIMPLEPUSH_KEY;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
 
 const THREADS_TO_WATCH = [
     { board: 'rf', id: '5757010', lastCount: 0 },
     { board: 'rf', id: '5502595', lastCount: 0 }
 ];
 
+// Настройка почтового клиента (автоматически определит Gmail, Yandex и др.)
+const transporter = nodemailer.createTransport({
+    service: EMAIL_USER && EMAIL_USER.includes('@yandex') ? 'Yandex' : 'gmail',
+    auth: {
+        user: EMAIL_USER,
+        pass: EMAIL_PASS
+    }
+});
+
 async function fetchWithTimeout(resource, options = {}) {
     const { timeout = 10000 } = options; 
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
-    
     const response = await fetch(resource, { ...options, signal: controller.signal });
     clearTimeout(id);
     return response;
 }
 
-async function sendPushNotification(title, message) {
-    if (!SIMPLEPUSH_KEY) return; 
-
+async function sendEmailNotification(title, message) {
+    if (!EMAIL_USER || !EMAIL_PASS) return;
     try {
-        const payload = {
-            key: SIMPLEPUSH_KEY,
-            title: title,
-            msg: message
-        };
-
-        await fetchWithTimeout('https://api.simplepush.io/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            timeout: 5000 
+        await transporter.sendMail({
+            from: `"Тред Радар" <${EMAIL_USER}>`,
+            to: EMAIL_USER, // Письмо летит самому себе
+            subject: title,
+            text: message
         });
+        console.log(`[DEBUG] ПИСЬМО ОТПРАВЛЕНО НА ПОЧТУ!`);
     } catch (err) {
-        console.log(`[DEBUG] Ошибка отправки в Simplepush: ${err.message}`);
+        console.log(`[DEBUG] ОШИБКА ОТПРАВКИ ПИСЬМА: ${err.message}`);
     }
 }
 
 async function checkThreads() {
-    if (!SIMPLEPUSH_KEY) {
-        console.log('[DEBUG] Ключ Simplepush не найден!');
+    if (!EMAIL_USER || !EMAIL_PASS) {
+        console.log('[DEBUG] Почта или пароль не настроены в Render Environment!');
         return;
     }
 
@@ -181,28 +186,30 @@ async function checkThreads() {
             const data = await response.json();
             const currentPostCount = data.threads[0].posts.length;
 
-            console.log(`[DEBUG] Тред ${thread.id}: сейчас ${currentPostCount} постов. (Было: ${thread.lastCount})`);
+            console.log(`[DEBUG] Тред ${thread.id}: сейчас ${currentPostCount} постов. (В памяти было: ${thread.lastCount})`);
 
-            // Первый запуск - просто запоминаем и присылаем тестовый пуш, чтобы проверить связь
             if (thread.lastCount === 0) {
                 console.log(`[DEBUG] Первый запуск для ${thread.id}. Запоминаем.`);
                 thread.lastCount = currentPostCount; 
-                await sendPushNotification(`Старт: /${thread.board}/`, `Тред ${thread.id}\nСтартовое количество: ${currentPostCount}`);
+                await sendEmailNotification(`🚀 Стартовый отчет /${thread.board}/`, `Скрипт успешно запущен.\nТред: ${thread.id}\nТекущее количество постов: ${currentPostCount}`);
                 continue;
             }
 
-            // Если появились новые посты
             if (currentPostCount > thread.lastCount) {
                 const newPostsCount = currentPostCount - thread.lastCount;
-                console.log(`[DEBUG] Тред ${thread.id}: ЕСТЬ НОВЫЕ ПОСТЫ (+${newPostsCount})! Отправляю пуш.`);
+                console.log(`[DEBUG] Тред ${thread.id}: ЕСТЬ НОВЫЕ ПОСТЫ (+${newPostsCount})! Отправляю письмо.`);
                 
-                const title = `🚨 Бамп в /${thread.board}/!`;
-                const msg = `Новых постов: +${newPostsCount}\nВсего постов: ${currentPostCount}\n\nСсылка: ${threadHtmlUrl}`;
+                const title = `🚨 Бамп в треде ${thread.id}!`;
+                let msg = `Новых постов: +${newPostsCount}\nВсего постов: ${currentPostCount}\n\nСсылка: ${threadHtmlUrl}`;
                 
-                await sendPushNotification(title, msg);
+                if (currentPostCount >= 480) {
+                    msg += `\n\n⚠️ ВНИМАНИЕ! СКОРО БАМПЛИМИТ! ПОРА ПЕРЕКАТЫВАТЬ!`;
+                }
+                
+                await sendEmailNotification(title, msg);
                 thread.lastCount = currentPostCount; 
             } else {
-                console.log(`[DEBUG] Тред ${thread.id}: новых постов нет. Пуш не отправляем.`);
+                console.log(`[DEBUG] Тред ${thread.id}: новых постов нет. Письмо не отправляем.`);
             }
 
         } catch (error) {
