@@ -109,28 +109,22 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`Port: ${PORT}`);
 });
 
-// =========================================================================
-// --- ФОНОВЫЙ ПРОЦЕСС (Почта, явные настройки портов) ---
-// =========================================================================
-
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
 
 const THREADS_TO_WATCH = [
-    { board: 'rf', id: '5502595', lastCount: 0 }
+    { board: 'rf', id: '5757010', lastCount: 0 }
 ];
 
-// Бронебойная настройка SMTP-клиента
 const transporter = nodemailer.createTransport({
     host: EMAIL_USER && EMAIL_USER.includes('@yandex') ? 'smtp.yandex.ru' : 'smtp.gmail.com',
-    port: 465, // Принудительно используем защищенный порт
+    port: 465, 
     secure: true, 
     auth: {
         user: EMAIL_USER,
         pass: EMAIL_PASS
     },
     tls: {
-        // Игнорируем ошибки сертификатов внутри облака Render
         rejectUnauthorized: false
     }
 });
@@ -149,7 +143,7 @@ async function sendEmailNotification(title, message) {
     try {
         await transporter.sendMail({
             from: `"Тред Радар" <${EMAIL_USER}>`,
-            to: 'belovicynl@gmail.com', // ЖЕСТКО ПРОПИСАН ТВОЙ ОСНОВНОЙ ЯЩИК
+            to: 'belovicynl@gmail.com',
             subject: title,
             text: message
         });
@@ -193,9 +187,8 @@ async function checkThreads() {
             console.log(`[DEBUG] Тред ${thread.id}: сейчас ${currentPostCount} постов. (В памяти было: ${thread.lastCount})`);
 
             if (thread.lastCount === 0) {
-                console.log(`[DEBUG] Первый запуск (или рестарт сервера) для ${thread.id}. Просто запоминаем количество: ${currentPostCount}.`);
+                console.log(`[DEBUG] Первый запуск. Запоминаем: ${currentPostCount}`);
                 thread.lastCount = currentPostCount; 
-                // Убрана отправка письма о старте, чтобы не спамило при каждом пробуждении Render
                 continue;
             }
 
@@ -206,24 +199,21 @@ async function checkThreads() {
                 const title = `🚨 Бамп в треде ${thread.id}!`;
                 let msg = `Новых постов: +${newPostsCount}\nВсего постов: ${currentPostCount}\n\nСсылка: ${threadHtmlUrl}`;
                 
-                if (currentPostCount >= 480) {
-                    msg += `\n\n⚠️ ВНИМАНИЕ! СКОРО БАМПЛИМИТ! ПОРА ПЕРЕКАТЫВАТЬ!`;
+                if (currentPostCount >= 490) {
+                    msg += `\n\nСКОРО БАМПЛИМИТ. ПОРА КАТИТЬ!`;
                 }
                 
                 await sendEmailNotification(title, msg);
                 thread.lastCount = currentPostCount; 
             } else {
-                console.log(`[DEBUG] Тред ${thread.id}: новых постов нет. Письмо не отправляем.`);
+                console.log(`[DEBUG] Тред ${thread.id}: новых постов нет.`);
             }
 
         } catch (error) {
-            console.log(`[DEBUG] Тред ${thread.id}: Ошибка сети / Cloudflare (${error.message})`);
+            console.log(`[DEBUG] Тред ${thread.id}: Ошибка сети (${error.message})`);
         }
     }
-    
-    console.log('[DEBUG] --- ПРОВЕРКА ЗАВЕРШЕНА ---\n');
 }
 
-// Изменено: 60000 миллисекунд = 1 минута
 setInterval(checkThreads, 60000);
 checkThreads();
