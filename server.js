@@ -109,7 +109,7 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 // =========================================================================
-// --- ФОНОВЫЙ ПРОЦЕСС (Скрытый чекер + ОТЛАДКА) ---
+// --- ФОНОВЫЙ ПРОЦЕСС (Умный чекер с защитой от спама) ---
 // =========================================================================
 
 const SIMPLEPUSH_KEY = process.env.SIMPLEPUSH_KEY;
@@ -136,7 +136,8 @@ async function sendPushNotification(title, message) {
         const payload = {
             key: SIMPLEPUSH_KEY,
             title: title,
-            msg: message
+            msg: message,
+            event: 'report' 
         };
 
         await fetchWithTimeout('https://api.simplepush.io/send', {
@@ -146,23 +147,21 @@ async function sendPushNotification(title, message) {
             timeout: 5000 
         });
     } catch (err) {
-        console.log(`[DEBUG] Ошибка отправки пуша в Simplepush: ${err.message}`);
+        console.log(`[DEBUG] Ошибка Simplepush: ${err.message}`);
     }
 }
 
 async function checkThreads() {
-    if (!SIMPLEPUSH_KEY) {
-        console.log('[DEBUG] Ключ Simplepush не найден в настройках Render!');
-        return;
-    }
+    if (!SIMPLEPUSH_KEY) return;
+
+    let reportMessage = ""; 
+    let hasChanges = false; // Флаг: были ли изменения с прошлой проверки?
 
     for (let thread of THREADS_TO_WATCH) {
         try {
             const apiUrl = `https://2ch.su/${thread.board}/res/${thread.id}.json`;
             const threadHtmlUrl = `https://2ch.su/${thread.board}/res/${thread.id}.html`;
             
-            console.log(`[DEBUG] Проверяю тред ${thread.id}...`);
-
             const response = await fetchWithTimeout(apiUrl, {
                 headers: { 
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -174,38 +173,56 @@ async function checkThreads() {
             });
 
             if (!response.ok) {
-                console.log(`[DEBUG] Двач заблокировал запрос к ${thread.id}! Код ошибки: ${response.status}`);
+                // Если тред 404, запишем это, но спамить не будем, если уже писали
+                if (thread.lastCount !== -1) {
+                    reportMessage += `/${thread.board}/${thread.id} — УДАЛЕН ИЛИ УТОНУЛ ☠️\n`;
+                    thread.lastCount = -1; // Помечаем как мертвый
+                    hasChanges = true;
+                }
                 continue;
             }
 
             const data = await response.json();
             const currentPostCount = data.threads[0].posts.length;
 
-            console.log(`[DEBUG] Тред ${thread.id}: сейчас ${currentPostCount} постов. (В памяти было: ${thread.lastCount})`);
-
+            // Если это первый запуск сервера, просто запоминаем и присылаем стартовый отчет
             if (thread.lastCount === 0) {
-                thread.lastCount = currentPostCount; 
-                console.log(`[DEBUG] Первый запуск. Запомнил стартовое кол-во для ${thread.id}. Жду бампов.`);
-                continue;
+                thread.lastCount = currentPostCount;
+                hasChanges = true;
+            } 
+            // Если появились новые посты
+            else if (currentPostCount > thread.lastCount) {
+                thread.lastCount = currentPostCount;
+                hasChanges = true;
             }
 
-            if (currentPostCount > thread.lastCount) {
-                const newPostsCount = currentPostCount - thread.lastCount;
-                console.log(`[DEBUG] ЕСТЬ НОВЫЕ ПОСТЫ (+${newPostsCount})! Пытаюсь отправить пуш...`);
+            // Добавляем строчку в отчет только если есть изменения
+            if (hasChanges) {
+                reportMessage += `/${thread.board}/${thread.id} — ${currentPostCount} постов\n`;
                 
-                const title = `🚨 Бамп в /${thread.board}/!`;
-                const msg = `Новых постов: +${newPostsCount}\nВсего постов стало: ${currentPostCount}\n\nСсылка: ${threadHtmlUrl}`;
-                
-                await sendPushNotification(title, msg);
-                thread.lastCount = currentPostCount; 
-                console.log(`[DEBUG] Пуш успешно отправлен на телефон!`);
+                // Проверка на опасность переката (лимит 500)
+                if (currentPostCount >= 490) {
+                    reportMessage += `ВНИМАНИЕ! БЛИЗКО К БАМПЛИМИТУ! ГОТОВЬ ПЕРЕКАТ!\n`;
+                }
+                reportMessage += `${threadHtmlUrl}\n\n`;
             }
+
         } catch (error) {
-            console.log(`[DEBUG] Ошибка/Таймаут при проверке ${thread.id}: ${error.message}`);
+            // Ошибки Cloudflare глушим, чтобы не спамить в пуши
         }
+    }
+
+    // Отправляем пуш ТОЛЬКО если были изменения в тредах
+    if (hasChanges && reportMessage !== "") {
+        await sendPushNotification("📊 Обновление тредов", reportMessage.trim());
+        console.log("[DEBUG] Отправлен отчет (были изменения).");
+    } else {
+        console.log("[DEBUG] Проверка пройдена. Новых постов нет, спим дальше.");
     }
 }
 
-// Запуск раз в 45 секунд
-setInterval(checkThreads, 45000);
+// Запускаем проверку каждые 5 минут (300 000 миллисекунд)
+setInterval(checkThreads, 300000);
+
+// Делаем самую первую проверку сразу при старте, чтобы ты понял, что скрипт работает
 checkThreads();
