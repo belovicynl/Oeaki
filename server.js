@@ -109,14 +109,14 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 // =========================================================================
-// --- ФОНОВЫЙ ПРОЦЕСС (Прямой ежечасный статус-отчет) ---
+// --- ФОНОВЫЙ ПРОЦЕСС (Проверка каждые 5 минут с ПОДРОБНЫМИ ЛОГАМИ) ---
 // =========================================================================
 
 const SIMPLEPUSH_KEY = process.env.SIMPLEPUSH_KEY;
 
 const THREADS_TO_WATCH = [
-    { board: 'rf', id: '5757010' },
-    { board: 'rf', id: '5502595' }
+    { board: 'rf', id: '5757010', lastCount: 0 },
+    { board: 'rf', id: '5502595', lastCount: 0 }
 ];
 
 async function fetchWithTimeout(resource, options = {}) {
@@ -152,54 +152,69 @@ async function sendPushNotification(title, message) {
 
 async function checkThreads() {
     if (!SIMPLEPUSH_KEY) {
-        console.log('[DEBUG] Ключ не найден!');
+        console.log('[DEBUG] Ключ Simplepush не найден!');
         return;
     }
 
-    console.log('\n[DEBUG] --- НАЧАЛО ПРОВЕРКИ ---');
-    let reportMessage = "";
+    console.log('\n[DEBUG] --- НАЧАЛО ПРОВЕРКИ (Раз в 5 минут) ---');
 
     for (let thread of THREADS_TO_WATCH) {
         try {
             const apiUrl = `https://2ch.su/${thread.board}/res/${thread.id}.json`;
+            const threadHtmlUrl = `https://2ch.su/${thread.board}/res/${thread.id}.html`;
             
             const response = await fetchWithTimeout(apiUrl, {
                 headers: { 
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'application/json, text/javascript, */*; q=0.01',
-                    'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Accept-Language': 'ru-RU,ru;q=0.9',
                     'Referer': `https://2ch.su/${thread.board}/`
                 },
                 timeout: 10000 
             });
 
             if (!response.ok) {
-                console.log(`[DEBUG] Тред ${thread.id}: ОШИБКА ДВАЧА (код ${response.status}) ИЛИ ТРЕД УДАЛЕН`);
-                reportMessage += `/${thread.board}/${thread.id} — Ошибка доступа или удален\n`;
+                console.log(`[DEBUG] Тред ${thread.id}: ОШИБКА ИЛИ УДАЛЕН (код ${response.status})`);
                 continue;
             }
 
             const data = await response.json();
             const currentPostCount = data.threads[0].posts.length;
 
-            console.log(`[DEBUG] Тред ${thread.id}: сейчас ${currentPostCount} постов.`);
-            reportMessage += `/${thread.board}/${thread.id} — ${currentPostCount} постов\n`;
+            console.log(`[DEBUG] Тред ${thread.id}: сейчас ${currentPostCount} постов. (Было: ${thread.lastCount})`);
+
+            // Первый запуск - просто запоминаем и присылаем тестовый пуш, чтобы проверить связь
+            if (thread.lastCount === 0) {
+                console.log(`[DEBUG] Первый запуск для ${thread.id}. Запоминаем.`);
+                thread.lastCount = currentPostCount; 
+                await sendPushNotification(`Старт: /${thread.board}/`, `Тред ${thread.id}\nСтартовое количество: ${currentPostCount}`);
+                continue;
+            }
+
+            // Если появились новые посты
+            if (currentPostCount > thread.lastCount) {
+                const newPostsCount = currentPostCount - thread.lastCount;
+                console.log(`[DEBUG] Тред ${thread.id}: ЕСТЬ НОВЫЕ ПОСТЫ (+${newPostsCount})! Отправляю пуш.`);
+                
+                const title = `🚨 Бамп в /${thread.board}/!`;
+                const msg = `Новых постов: +${newPostsCount}\nВсего постов: ${currentPostCount}\n\nСсылка: ${threadHtmlUrl}`;
+                
+                await sendPushNotification(title, msg);
+                thread.lastCount = currentPostCount; 
+            } else {
+                console.log(`[DEBUG] Тред ${thread.id}: новых постов нет. Пуш не отправляем.`);
+            }
 
         } catch (error) {
-            console.log(`[DEBUG] Тред ${thread.id}: ТАЙМАУТ CLOUDFLARE (${error.message})`);
-            reportMessage += `/${thread.board}/${thread.id} — Заблокировано Cloudflare\n`;
+            console.log(`[DEBUG] Тред ${thread.id}: Ошибка сети / Cloudflare (${error.message})`);
         }
     }
-
-    if (reportMessage !== "") {
-        await sendPushNotification("📊 Статус тредов", reportMessage.trim());
-        console.log("[DEBUG] Отчет отправлен в Simplepush.");
-    }
+    
     console.log('[DEBUG] --- ПРОВЕРКА ЗАВЕРШЕНА ---\n');
 }
 
-// Запускаем проверку каждые 60 минут (3 600 000 миллисекунд)
-setInterval(checkThreads, 3600000);
+// Запускаем проверку ровно каждые 5 минут (300 000 миллисекунд)
+setInterval(checkThreads, 300000);
 
 // Делаем первую проверку сразу при старте
 checkThreads();
