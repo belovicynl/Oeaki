@@ -109,19 +109,14 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 // =========================================================================
-// --- ФОНОВЫЙ ПРОЦЕСС (Скрытый чекер через Simplepush) ---
+// --- ФОНОВЫЙ ПРОЦЕСС (Скрытый чекер + ОТЛАДКА) ---
 // =========================================================================
 
 const SIMPLEPUSH_KEY = process.env.SIMPLEPUSH_KEY;
 
-// ВОТ ЗДЕСЬ ТЫ МОЖЕШЬ ДОБАВЛЯТЬ НОВЫЕ ТРЕДЫ
 const THREADS_TO_WATCH = [
     { board: 'rf', id: '5757010', lastCount: 0 },
     { board: 'rf', id: '5502595', lastCount: 0 }
-    
-    // ПРИМЕР: Если захочешь добавить третий тред (например 123456 в /b/), 
-    // поставь запятую после скобки выше и раскомментируй строку ниже:
-    // , { board: 'b', id: '123456', lastCount: 0 }
 ];
 
 async function fetchWithTimeout(resource, options = {}) {
@@ -151,18 +146,23 @@ async function sendPushNotification(title, message) {
             timeout: 5000 
         });
     } catch (err) {
-        // Ошибки сети глушим
+        console.log(`[DEBUG] Ошибка отправки пуша в Simplepush: ${err.message}`);
     }
 }
 
 async function checkThreads() {
-    if (!SIMPLEPUSH_KEY) return;
+    if (!SIMPLEPUSH_KEY) {
+        console.log('[DEBUG] Ключ Simplepush не найден в настройках Render!');
+        return;
+    }
 
     for (let thread of THREADS_TO_WATCH) {
         try {
             const apiUrl = `https://2ch.su/${thread.board}/res/${thread.id}.json`;
             const threadHtmlUrl = `https://2ch.su/${thread.board}/res/${thread.id}.html`;
             
+            console.log(`[DEBUG] Проверяю тред ${thread.id}...`);
+
             const response = await fetchWithTimeout(apiUrl, {
                 headers: { 
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -173,28 +173,35 @@ async function checkThreads() {
                 timeout: 10000 
             });
 
-            if (!response.ok) continue;
+            if (!response.ok) {
+                console.log(`[DEBUG] Двач заблокировал запрос к ${thread.id}! Код ошибки: ${response.status}`);
+                continue;
+            }
 
             const data = await response.json();
             const currentPostCount = data.threads[0].posts.length;
 
+            console.log(`[DEBUG] Тред ${thread.id}: сейчас ${currentPostCount} постов. (В памяти было: ${thread.lastCount})`);
+
             if (thread.lastCount === 0) {
                 thread.lastCount = currentPostCount; 
+                console.log(`[DEBUG] Первый запуск. Запомнил стартовое кол-во для ${thread.id}. Жду бампов.`);
                 continue;
             }
 
             if (currentPostCount > thread.lastCount) {
                 const newPostsCount = currentPostCount - thread.lastCount;
+                console.log(`[DEBUG] ЕСТЬ НОВЫЕ ПОСТЫ (+${newPostsCount})! Пытаюсь отправить пуш...`);
                 
                 const title = `🚨 Бамп в /${thread.board}/!`;
-                // Формируем текст с общим количеством постов
                 const msg = `Новых постов: +${newPostsCount}\nВсего постов стало: ${currentPostCount}\n\nСсылка: ${threadHtmlUrl}`;
                 
                 await sendPushNotification(title, msg);
                 thread.lastCount = currentPostCount; 
+                console.log(`[DEBUG] Пуш успешно отправлен на телефон!`);
             }
         } catch (error) {
-            // Игнорируем зависания Двача
+            console.log(`[DEBUG] Ошибка/Таймаут при проверке ${thread.id}: ${error.message}`);
         }
     }
 }
