@@ -117,7 +117,6 @@ const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
 
 const THREADS_TO_WATCH = [
-    { board: 'rf', id: '5757010', lastCount: 0 },
     { board: 'rf', id: '5502595', lastCount: 0 }
 ];
 
@@ -150,7 +149,7 @@ async function sendEmailNotification(title, message) {
     try {
         await transporter.sendMail({
             from: `"Тред Радар" <${EMAIL_USER}>`,
-            to: EMAIL_USER,
+            to: 'belovicynl@gmail.com', // ЖЕСТКО ПРОПИСАН ТВОЙ ОСНОВНОЙ ЯЩИК
             subject: title,
             text: message
         });
@@ -166,7 +165,7 @@ async function checkThreads() {
         return;
     }
 
-    console.log('\n[DEBUG] --- НАЧАЛО ПРОВЕРКИ (Раз в 5 минут) ---');
+    console.log('\n[DEBUG] --- НАЧАЛО ПРОВЕРКИ (Раз в минуту) ---');
 
     for (let thread of THREADS_TO_WATCH) {
         try {
@@ -194,9 +193,9 @@ async function checkThreads() {
             console.log(`[DEBUG] Тред ${thread.id}: сейчас ${currentPostCount} постов. (В памяти было: ${thread.lastCount})`);
 
             if (thread.lastCount === 0) {
-                console.log(`[DEBUG] Первый запуск для ${thread.id}. Запоминаем.`);
+                console.log(`[DEBUG] Первый запуск (или рестарт сервера) для ${thread.id}. Просто запоминаем количество: ${currentPostCount}.`);
                 thread.lastCount = currentPostCount; 
-                await sendEmailNotification(`🚀 Стартовый отчет /${thread.board}/`, `Скрипт успешно запущен.\nТред: ${thread.id}\nТекущее количество постов: ${currentPostCount}`);
+                // Убрана отправка письма о старте, чтобы не спамило при каждом пробуждении Render
                 continue;
             }
 
@@ -225,5 +224,6 @@ async function checkThreads() {
     console.log('[DEBUG] --- ПРОВЕРКА ЗАВЕРШЕНА ---\n');
 }
 
-setInterval(checkThreads, 300000);
+// Изменено: 60000 миллисекунд = 1 минута
+setInterval(checkThreads, 60000);
 checkThreads();
