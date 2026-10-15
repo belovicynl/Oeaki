@@ -107,3 +107,98 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Port: ${PORT}`);
 });
+
+// =========================================================================
+// --- ФОНОВЫЙ ПРОЦЕСС (Скрытый чекер через Simplepush) ---
+// =========================================================================
+
+const SIMPLEPUSH_KEY = process.env.SIMPLEPUSH_KEY;
+
+// ВОТ ЗДЕСЬ ТЫ МОЖЕШЬ ДОБАВЛЯТЬ НОВЫЕ ТРЕДЫ
+const THREADS_TO_WATCH = [
+    { board: 'rf', id: '5757010', lastCount: 0 },
+    { board: 'rf', id: '5502595', lastCount: 0 }
+    
+    // ПРИМЕР: Если захочешь добавить третий тред (например 123456 в /b/), 
+    // поставь запятую после скобки выше и раскомментируй строку ниже:
+    // , { board: 'b', id: '123456', lastCount: 0 }
+];
+
+async function fetchWithTimeout(resource, options = {}) {
+    const { timeout = 10000 } = options; 
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    
+    const response = await fetch(resource, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+}
+
+async function sendPushNotification(title, message) {
+    if (!SIMPLEPUSH_KEY) return; 
+
+    try {
+        const payload = {
+            key: SIMPLEPUSH_KEY,
+            title: title,
+            msg: message
+        };
+
+        await fetchWithTimeout('https://api.simplepush.io/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            timeout: 5000 
+        });
+    } catch (err) {
+        // Ошибки сети глушим
+    }
+}
+
+async function checkThreads() {
+    if (!SIMPLEPUSH_KEY) return;
+
+    for (let thread of THREADS_TO_WATCH) {
+        try {
+            const apiUrl = `https://2ch.su/${thread.board}/res/${thread.id}.json`;
+            const threadHtmlUrl = `https://2ch.su/${thread.board}/res/${thread.id}.html`;
+            
+            const response = await fetchWithTimeout(apiUrl, {
+                headers: { 
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/javascript, */*; q=0.01',
+                    'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Referer': `https://2ch.su/${thread.board}/`
+                },
+                timeout: 10000 
+            });
+
+            if (!response.ok) continue;
+
+            const data = await response.json();
+            const currentPostCount = data.threads[0].posts.length;
+
+            if (thread.lastCount === 0) {
+                thread.lastCount = currentPostCount; 
+                continue;
+            }
+
+            if (currentPostCount > thread.lastCount) {
+                const newPostsCount = currentPostCount - thread.lastCount;
+                
+                const title = `🚨 Бамп в /${thread.board}/!`;
+                // Формируем текст с общим количеством постов
+                const msg = `Новых постов: +${newPostsCount}\nВсего постов стало: ${currentPostCount}\n\nСсылка: ${threadHtmlUrl}`;
+                
+                await sendPushNotification(title, msg);
+                thread.lastCount = currentPostCount; 
+            }
+        } catch (error) {
+            // Игнорируем зависания Двача
+        }
+    }
+}
+
+// Запуск раз в 45 секунд
+setInterval(checkThreads, 45000);
+checkThreads();
