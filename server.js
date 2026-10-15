@@ -4,7 +4,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer'); // Подключаем почтальона
+const nodemailer = require('nodemailer');
 
 const app = express();
 const server = http.createServer(app);
@@ -81,7 +81,6 @@ io.on('connection', async (socket) => {
         } catch (err) {}
     });
 
-    // ... (тут остались все твои сокеты для рисовалки без изменений)
     socket.on('undo_stroke', async (strokeId) => {
         socket.broadcast.emit('remove_stroke', strokeId);
         try {
@@ -111,7 +110,7 @@ server.listen(PORT, '0.0.0.0', () => {
 });
 
 // =========================================================================
-// --- ФОНОВЫЙ ПРОЦЕСС (Почта, интервал 5 минут, подробные логи) ---
+// --- ФОНОВЫЙ ПРОЦЕСС (Почта, явные настройки портов) ---
 // =========================================================================
 
 const EMAIL_USER = process.env.EMAIL_USER;
@@ -122,12 +121,18 @@ const THREADS_TO_WATCH = [
     { board: 'rf', id: '5502595', lastCount: 0 }
 ];
 
-// Настройка почтового клиента (автоматически определит Gmail, Yandex и др.)
+// Бронебойная настройка SMTP-клиента
 const transporter = nodemailer.createTransport({
-    service: EMAIL_USER && EMAIL_USER.includes('@yandex') ? 'Yandex' : 'gmail',
+    host: EMAIL_USER && EMAIL_USER.includes('@yandex') ? 'smtp.yandex.ru' : 'smtp.gmail.com',
+    port: 465, // Принудительно используем защищенный порт
+    secure: true, 
     auth: {
         user: EMAIL_USER,
         pass: EMAIL_PASS
+    },
+    tls: {
+        // Игнорируем ошибки сертификатов внутри облака Render
+        rejectUnauthorized: false
     }
 });
 
@@ -145,7 +150,7 @@ async function sendEmailNotification(title, message) {
     try {
         await transporter.sendMail({
             from: `"Тред Радар" <${EMAIL_USER}>`,
-            to: EMAIL_USER, // Письмо летит самому себе
+            to: EMAIL_USER,
             subject: title,
             text: message
         });
@@ -220,8 +225,5 @@ async function checkThreads() {
     console.log('[DEBUG] --- ПРОВЕРКА ЗАВЕРШЕНА ---\n');
 }
 
-// Запускаем проверку ровно каждые 5 минут (300 000 миллисекунд)
 setInterval(checkThreads, 300000);
-
-// Делаем первую проверку сразу при старте
 checkThreads();
